@@ -1,0 +1,46 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="${mod_authors}"
+logoFile="logo.png"
+description='''${mod_description}'''
+[[dependencies.${mod_id}]]
+    modId="forge"
+    mandatory=true
+    versionRange="${forge_version_range}"
+    ordering="NONE"
+    side="BOTH"
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"
+[[dependencies.${mod_id}]]
+    modId="emotecraft"
+    mandatory=false
+    versionRange="*"
+    ordering="AFTER"
+    side="BOTH"
+[[dependencies.${mod_id}]]
+    modId="curios"
+    mandatory=false
+    versionRange="*"
+    ordering="AFTER"
+    side="BOTH"
+[[dependencies.${mod_id}]]
+    modId="carryon"
+    mandatory=false
+    versionRange="*"
+    ordering="AFTER"
+    side="BOTH"
+[[dependencies.${mod_id}]]
+    modId="etched"
+    mandatory=false
+    versionRange="*"
+    ordering="AFTER"
+    side="BOTH"

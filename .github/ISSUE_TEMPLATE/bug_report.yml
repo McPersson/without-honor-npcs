@@ -1,0 +1,63 @@
+name: Bug report
+description: "Report a problem with Without Honor: NPCs"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill in as much as you can -
+        it makes problems far easier to track down.
+  - type: input
+    id: mod-version
+    attributes:
+      label: Mod version
+      placeholder: "e.g. 0.9.0"
+    validations:
+      required: true
+  - type: input
+    id: mc-forge
+    attributes:
+      label: Minecraft / Forge version
+      placeholder: "e.g. Minecraft 1.20.1, Forge 47.4.20"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug, and what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or crash report
+      description: >
+        Paste the relevant part of logs/latest.log, or attach the full crash report.
+        You can drag and drop a file into this box.
+      render: text
+  - type: input
+    id: other-mods
+    attributes:
+      label: Other mods installed
+      description: Especially any of the optional integrations.
+      placeholder: "e.g. Emotecraft, Curios, Etched"
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I'm using the latest version of the mod.
+          required: true
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true

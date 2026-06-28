@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "wh_npcs:block/trigger_helper" }
+  }
+}

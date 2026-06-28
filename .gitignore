@@ -1,0 +1,28 @@
+# eclipse
+bin
+*.launch
+.settings
+.metadata
+.classpath
+.project
+
+# idea
+out
+*.ipr
+*.iws
+*.iml
+.idea
+
+# gradle
+build
+.gradle
+
+# other
+eclipse
+run
+
+# Files from Forge MDK (boilerplate, not part of this mod)
+forge*changelog.txt
+changelog.txt
+README.txt
+CREDITS.txt

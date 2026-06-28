@@ -1,0 +1,81 @@
+Without Honor: NPCs
+Copyright (c) 2026 McPersson. All Rights Reserved.
+
+This is a SOURCE-AVAILABLE, PROPRIETARY license. The source code may be
+published publicly (e.g. on GitHub) for transparency and bug reporting only.
+Making the source visible does NOT grant any right to reuse, modify, fork,
+port, or compile it, except as explicitly stated below.
+
+In this document, "the Mod" means the "Without Honor: NPCs" mod, including its
+source code, compiled binaries, assets, and accompanying files. "the Author"
+means the copyright holder named above.
+
+------------------------------------------------------------------------------
+1. YOU MAY
+------------------------------------------------------------------------------
+  a) Download and use the official, unmodified compiled Mod in Minecraft,
+     in single-player, on servers, and for personal/community play.
+  b) View the published source code for reference and to report bugs or
+     suggest changes to the Author.
+  c) Redistribute, re-upload, mirror, or include in modpacks the official,
+     unmodified Mod file - on any site, platform, or fan resource - provided
+     that:
+       - the original Mod file is distributed unchanged (or referenced from
+         its official Modrinth/CurseForge page),
+       - the Mod is credited and a link to an official page is provided, and
+       - this license and all copyright/attribution notices are kept intact.
+
+------------------------------------------------------------------------------
+2. YOU MAY NOT (without prior written permission of the Author)
+------------------------------------------------------------------------------
+  a) Distribute modified versions, forks, or "your own" builds of the Mod.
+  b) Port, backport, or adapt the Mod to other Minecraft versions or to other
+     mod loaders (e.g. Fabric, NeoForge, Quilt).
+  c) Reuse, copy, translate, or incorporate any portion of the source code,
+     assets, or design of the Mod into another project.
+  d) Sell the Mod, or charge money for access to it or for modified versions.
+     (This is also required by the Minecraft End User License Agreement.)
+  e) Remove, obscure, or alter this license, copyright notices, or attribution.
+
+Note: viewing or forking the repository within a hosting platform's own
+interface (as that platform's Terms of Service may allow) does not grant any
+of the rights restricted above.
+
+------------------------------------------------------------------------------
+3. MASCOT
+------------------------------------------------------------------------------
+The "Alessia" mascot and its texture are governed separately and additionally
+by ALESSIA_LICENSE.txt.
+
+------------------------------------------------------------------------------
+4. CONTRIBUTIONS
+------------------------------------------------------------------------------
+By submitting a contribution (e.g. a pull request) for inclusion in the Mod,
+you grant the Author a perpetual, irrevocable, worldwide, royalty-free license
+to use, modify, and distribute that contribution as part of the Mod under this
+license.
+
+------------------------------------------------------------------------------
+5. THIRD-PARTY COMPONENTS
+------------------------------------------------------------------------------
+Minecraft is a trademark of Mojang AB / Microsoft and is not covered by this
+license. Minecraft Forge and the Forge Mod Loader are licensed separately
+(LGPL 2.1); the Mod links to Forge via ordinary Java mechanisms and is not a
+derivative of it. Optional integrations (Emotecraft, Curios, Etched, Carry On)
+are NOT bundled with the Mod and remain the property of their respective
+authors under their own licenses.
+
+------------------------------------------------------------------------------
+6. NO WARRANTY
+------------------------------------------------------------------------------
+THE MOD IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE
+FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM, OUT OF, OR IN
+CONNECTION WITH THE MOD OR THE USE OR OTHER DEALINGS IN THE MOD.
+
+------------------------------------------------------------------------------
+7. TERMINATION
+------------------------------------------------------------------------------
+Any breach of this license automatically terminates the rights granted to you
+under Section 1. The restrictions in Section 2 remain in effect.
