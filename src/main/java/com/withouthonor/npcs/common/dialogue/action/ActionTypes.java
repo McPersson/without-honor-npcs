@@ -33,6 +33,7 @@ public final class ActionTypes {
         register("follow", Actions.Follow::fromJson);
         register("stop_follow", Actions.StopFollow::fromJson);
         register("follow_wait", Actions.FollowWait::fromJson);
+        register("effect", Actions.Effect::fromJson);
     }
 
     private ActionTypes() {

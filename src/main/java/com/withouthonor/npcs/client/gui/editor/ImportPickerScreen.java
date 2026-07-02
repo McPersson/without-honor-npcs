@@ -335,7 +335,7 @@ public class ImportPickerScreen extends ScaledScreen {
                     hovered ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE, false);
             if (showDelete) {
                 boolean renHover = isOver(mouseX, mouseY, renX(listX, listW), y + 3, 10, 10);
-                drawPencil(g, renX(listX, listW), y + 3, renHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GRAY);
+                VanillaUIHelper.drawRenameIcon(g, font, renX(listX, listW), y + 4, renHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GRAY);
                 boolean delHover = isOver(mouseX, mouseY, delX(listX, listW), y + 3, 10, 10);
                 g.drawString(font, "✕", delX(listX, listW), y + 4,
                         delHover ? 0xFFFF5555 : VanillaUIHelper.TEXT_GRAY, false);
@@ -624,12 +624,6 @@ public class ImportPickerScreen extends ScaledScreen {
         net.minecraft.Util.getPlatform().openFile(dir.toFile());
     }
 
-    private static void drawPencil(GuiGraphics g, int x, int y, int color) {
-        g.fill(x + 6, y, x + 9, y + 2, color);
-        g.fill(x + 4, y + 2, x + 7, y + 4, color);
-        g.fill(x + 2, y + 4, x + 5, y + 6, color);
-        g.fill(x, y + 6, x + 3, y + 9, color);
-    }
 
     private static void drawAuthorHead(GuiGraphics g, String author, int x, int y) {
         ClientSkinCache.Skin skin = author.isEmpty() ? null : ClientSkinCache.getInstance().get(author);

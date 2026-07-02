@@ -425,7 +425,7 @@ public class SkinLibraryScreen extends ScaledScreen {
             }
             boolean editHover = isOver(mouseX, mouseY, listX + LIST_W - 62, y + 5, 10, 10);
             if (hovered || renaming || editHover) {
-                drawPencil(g, listX + LIST_W - 62, y + 5,
+                VanillaUIHelper.drawRenameIcon(g, font, listX + LIST_W - 62, y + 6,
                         renaming ? VanillaUIHelper.TEXT_GOLD
                                 : (editHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GRAY));
                 if (editHover) {
@@ -534,12 +534,6 @@ public class SkinLibraryScreen extends ScaledScreen {
         return spec.replaceFirst("https?://", "");
     }
 
-    private static void drawPencil(GuiGraphics g, int x, int y, int c) {
-        g.fill(x + 6, y, x + 8, y + 2, c);
-        g.fill(x + 4, y + 2, x + 6, y + 4, c);
-        g.fill(x + 2, y + 4, x + 4, y + 6, c);
-        g.fill(x, y + 6, x + 2, y + 8, c);
-    }
 
     private void startRename(UrlSkinRegistry.UrlSkin url, int rowY) {
         cancelRename();

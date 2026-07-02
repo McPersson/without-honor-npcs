@@ -25,8 +25,14 @@ public class ScheduleScreen extends ScaledScreen {
     private static final int PAD = 8;
     private static final int HEADER_H = 22;
     private static final int MAX_ROWS = 10;
-    private static final int WIN_W = 478;
+    private static final int WIN_W = 496;
     private static final int WIN_H = 330;
+    private static final int COL_TRANSFORM = 164;
+    private static final int COL_POSE = 188;
+    private static final int COL_RADIUS = 262;
+    private static final int COL_EMOTE = 296;
+    private static final int COL_MARK = 368;
+    private static final int COL_DELETE = 432;
     private static final String[] POSES = {"stand", "wander", "sit", "sleep"};
     private static final String[] POSE_LABEL_KEYS = {"wh_npcs.ui.schedule.pose.stand",
             "wh_npcs.ui.schedule.pose.wander", "wh_npcs.ui.schedule.pose.sit", "wh_npcs.ui.schedule.pose.sleep"};
@@ -38,6 +44,7 @@ public class ScheduleScreen extends ScaledScreen {
 
     private final List<ScheduleEntry> rows = new ArrayList<>();
     private boolean enabled;
+    private boolean global;
     private final List<EditBox> timeBoxes = new ArrayList<>();
     private final List<EditBox> xBoxes = new ArrayList<>();
     private final List<EditBox> yBoxes = new ArrayList<>();
@@ -57,6 +64,7 @@ public class ScheduleScreen extends ScaledScreen {
         this.profileJson = profileJson;
         this.npc = npc;
         this.enabled = profileJson.has("schedule_enabled") && profileJson.get("schedule_enabled").getAsBoolean();
+        this.global = profileJson.has("schedule_global") && profileJson.get("schedule_global").getAsBoolean();
         if (profileJson.has("schedule")) {
             for (JsonElement e : profileJson.getAsJsonArray("schedule")) {
                 rows.add(ScheduleEntry.fromJson(e.getAsJsonObject()));
@@ -105,7 +113,7 @@ public class ScheduleScreen extends ScaledScreen {
             xBoxes.add(box(base + 46, y, 36, String.valueOf(e.x())));
             yBoxes.add(box(base + 86, y, 36, String.valueOf(e.y())));
             zBoxes.add(box(base + 126, y, 36, String.valueOf(e.z())));
-            EditBox rad = box(base + 240, y, 30, String.valueOf(e.radius()));
+            EditBox rad = box(base + COL_RADIUS, y, 30, String.valueOf(e.radius()));
             rad.visible = isWander(e);
             radiusBoxes.add(rad);
         }
@@ -155,7 +163,7 @@ public class ScheduleScreen extends ScaledScreen {
         g.drawString(font, "X", base + 46, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
         g.drawString(font, "Y", base + 86, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
         g.drawString(font, "Z", base + 126, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
-        g.drawString(font, Component.translatable("wh_npcs.ui.schedule.col.pose").getString(), base + 166, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
+        g.drawString(font, Component.translatable("wh_npcs.ui.schedule.col.pose").getString(), base + COL_POSE, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
         boolean anyWander = false;
         for (ScheduleEntry e : rows) {
             if (isWander(e)) {
@@ -164,25 +172,51 @@ public class ScheduleScreen extends ScaledScreen {
             }
         }
         if (anyWander) {
-            g.drawString(font, Component.translatable("wh_npcs.ui.schedule.col.radius").getString(), base + 240, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
+            g.drawString(font, Component.translatable("wh_npcs.ui.schedule.col.radius").getString(), base + COL_RADIUS, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
         }
-        g.drawString(font, Component.translatable("wh_npcs.ui.schedule.col.emote").getString(), base + 274, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
+        g.drawString(font, Component.translatable("wh_npcs.ui.schedule.col.emote").getString(), base + COL_EMOTE, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
 
         String tooltip = null;
+
+        boolean glHover = isOver(mouseX, mouseY, winX + PAD + 150, winY + HEADER_H + 4, 12, 12);
+        VanillaUIHelper.drawButton(g, winX + PAD + 150, winY + HEADER_H + 4, 12, 12, glHover);
+        if (global) {
+            VanillaUIHelper.drawCheck(g, winX + PAD + 151, winY + HEADER_H + 6, VanillaUIHelper.TEXT_GREEN);
+        }
+        g.drawString(font, Component.translatable("wh_npcs.ui.schedule.global").getString(),
+                winX + PAD + 168, winY + HEADER_H + 6, VanillaUIHelper.TEXT_GRAY, false);
+        if (glHover || isOver(mouseX, mouseY, winX + PAD + 168, winY + HEADER_H + 4, 90, 12)) {
+            tooltip = Component.translatable("wh_npcs.ui.schedule.global_tip").getString();
+        }
+        drawBtn(g, Component.translatable("wh_npcs.ui.schedule.global_panel").getString(),
+                winX + winW - PAD - 130, winY + HEADER_H + 2, 130, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+
         for (int i = 0; i < rows.size(); i++) {
             int y = listTop + i * 22;
             ScheduleEntry e = rows.get(i);
+            boolean tfHover = isOver(mouseX, mouseY, base + COL_TRANSFORM, y, 18, 18);
+            VanillaUIHelper.drawButton(g, base + COL_TRANSFORM, y, 18, 18, tfHover);
+            drawTransformIcon(g, base + COL_TRANSFORM + 5, y + 6,
+                    tfHover ? VanillaUIHelper.TEXT_YELLOW : (e.hasTransform() ? VanillaUIHelper.TEXT_GOLD : VanillaUIHelper.TEXT_WHITE));
             String poseLbl = e.isCustomPose() ? e.poseName() : poseLabel(e.pose());
-            drawBtn(g, font.plainSubstrByWidth(poseLbl, 64), base + 166, y, 70, mouseX, mouseY,
+            boolean poseCut = font.width(poseLbl) > 64;
+            String poseShown = poseCut ? font.plainSubstrByWidth(poseLbl, 64 - font.width("...")) + "..." : poseLbl;
+            drawBtn(g, poseShown, base + COL_POSE, y, 70, mouseX, mouseY,
                     e.isCustomPose() ? VanillaUIHelper.TEXT_GOLD : VanillaUIHelper.TEXT_AQUA);
+            if (poseCut && isOver(mouseX, mouseY, base + COL_POSE, y, 70, 18)) {
+                tooltip = poseLbl;
+            }
             String emoteLbl = e.emoteId().isEmpty() ? Component.translatable("wh_npcs.ui.schedule.emote").getString()
                     : "♪ " + emoteNames.getOrDefault(e.emoteId(), e.emoteId());
-            drawBtn(g, font.plainSubstrByWidth(emoteLbl, 60), base + 274, y, 66, mouseX, mouseY,
+            drawBtn(g, font.plainSubstrByWidth(emoteLbl, 60), base + COL_EMOTE, y, 66, mouseX, mouseY,
                     e.emoteId().isEmpty() ? VanillaUIHelper.TEXT_AQUA : VanillaUIHelper.TEXT_GOLD);
-            drawBtn(g, Component.translatable("wh_npcs.ui.schedule.mark").getString(), base + 346, y, 60, mouseX, mouseY,
+            drawBtn(g, Component.translatable("wh_npcs.ui.schedule.mark").getString(), base + COL_MARK, y, 60, mouseX, mouseY,
                     npc != null ? VanillaUIHelper.TEXT_WHITE : VanillaUIHelper.TEXT_DARK_GRAY);
-            drawBtn(g, "✕", base + 410, y, 18, mouseX, mouseY, VanillaUIHelper.TEXT_RED);
-            if (!e.emoteId().isEmpty() && isOver(mouseX, mouseY, base + 274, y, 66, 18)) {
+            drawBtn(g, "✕", base + COL_DELETE, y, 18, mouseX, mouseY, VanillaUIHelper.TEXT_RED);
+            if (tfHover) {
+                tooltip = Component.translatable("wh_npcs.ui.schedule.transform_tip").getString();
+            }
+            if (!e.emoteId().isEmpty() && isOver(mouseX, mouseY, base + COL_EMOTE, y, 66, 18)) {
                 tooltip = Component.translatable("wh_npcs.ui.schedule.tip.emote",
                         emoteNames.getOrDefault(e.emoteId(), e.emoteId())).getString();
             }
@@ -202,7 +236,11 @@ public class ScheduleScreen extends ScaledScreen {
     @Override
     protected void renderOverlay(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         if (hoverTooltip != null) {
-            g.renderTooltip(font, Component.literal(hoverTooltip), mouseX, mouseY);
+            List<Component> lines = new ArrayList<>();
+            for (String line : hoverTooltip.split("\n")) {
+                lines.add(Component.literal(line));
+            }
+            g.renderComponentTooltip(font, lines, mouseX, mouseY);
         }
     }
 
@@ -221,9 +259,24 @@ public class ScheduleScreen extends ScaledScreen {
                 enabled = !enabled;
                 return true;
             }
+            if (isOver(mouseX, mouseY, winX + PAD + 150, winY + HEADER_H + 4, 108, 12)) {
+                global = !global;
+                return true;
+            }
+            if (isOver(mouseX, mouseY, winX + winW - PAD - 130, winY + HEADER_H + 2, 130, 18)) {
+                apply();
+                if (minecraft != null) {
+                    minecraft.setScreen(new GlobalScheduleScreen(this));
+                }
+                return true;
+            }
             for (int i = 0; i < rows.size(); i++) {
                 int y = listTop + i * 22;
-                if (isOver(mouseX, mouseY, base + 166, y, 70, 18)) {
+                if (isOver(mouseX, mouseY, base + COL_TRANSFORM, y, 18, 18)) {
+                    openTransformEditor(i);
+                    return true;
+                }
+                if (isOver(mouseX, mouseY, base + COL_POSE, y, 70, 18)) {
                     writeBackRows();
                     final int row = i;
                     if (minecraft != null) {
@@ -233,7 +286,7 @@ public class ScheduleScreen extends ScaledScreen {
                     }
                     return true;
                 }
-                if (isOver(mouseX, mouseY, base + 274, y, 66, 18)) {
+                if (isOver(mouseX, mouseY, base + COL_EMOTE, y, 66, 18)) {
                     writeBackRows();
                     final int row = i;
                     if (minecraft != null) {
@@ -242,11 +295,11 @@ public class ScheduleScreen extends ScaledScreen {
                     }
                     return true;
                 }
-                if (isOver(mouseX, mouseY, base + 346, y, 60, 18)) {
+                if (isOver(mouseX, mouseY, base + COL_MARK, y, 60, 18)) {
                     beginPick(i);
                     return true;
                 }
-                if (isOver(mouseX, mouseY, base + 410, y, 18, 18)) {
+                if (isOver(mouseX, mouseY, base + COL_DELETE, y, 18, 18)) {
                     writeBackRows();
                     rows.remove(i);
                     init(minecraft, width, height);
@@ -270,7 +323,7 @@ public class ScheduleScreen extends ScaledScreen {
             int base = winX + PAD;
             for (int i = 0; i < rows.size(); i++) {
                 int y = listTop + i * 22;
-                if (isOver(mouseX, mouseY, base + 274, y, 66, 18)) {
+                if (isOver(mouseX, mouseY, base + COL_EMOTE, y, 66, 18)) {
                     setRowEmote(i, "", "", "");
                     return true;
                 }
@@ -309,6 +362,97 @@ public class ScheduleScreen extends ScaledScreen {
                 emoteName == null ? "" : emoteName, emoteAuthor == null ? "" : emoteAuthor));
     }
 
+    private static final String[] TF_KEYS = {"rot_x", "rot_y", "rot_z", "pos_x", "pos_y", "pos_z",
+            "scale_x", "scale_y", "scale_z"};
+
+    private void openTransformEditor(int row) {
+        writeBackRows();
+        ScheduleEntry e = rows.get(row);
+        JsonObject tf = new JsonObject();
+        boolean freeze = true;
+        boolean fromSnap = false;
+        if (e.poseSnapshot() != null && !e.poseSnapshot().isEmpty()) {
+            try {
+                JsonObject snap = JsonParser.parseString(e.poseSnapshot()).getAsJsonObject();
+                if (snap.has("transform")) {
+                    JsonObject t = snap.getAsJsonObject("transform");
+                    for (String k : TF_KEYS) {
+                        if (t.has(k)) {
+                            tf.add(k, t.get(k));
+                        }
+                    }
+                    fromSnap = true;
+                }
+                freeze = !snap.has("freeze") || snap.get("freeze").getAsBoolean();
+            } catch (Exception ignored) {
+            }
+        }
+        if (!fromSnap) {
+            for (String k : new String[]{"scale_x", "scale_y", "scale_z"}) {
+                if (profileJson.has(k)) {
+                    tf.add(k, profileJson.get(k));
+                }
+            }
+        }
+        final int r = row;
+        if (minecraft != null) {
+            minecraft.setScreen(new ScheduleTransformScreen(this, tf, npc, freeze,
+                    (newTf, fr) -> setRowTransform(r, newTf, fr)));
+        }
+    }
+
+    public void setRowTransform(int i, JsonObject transform, boolean freeze) {
+        if (i < 0 || i >= rows.size()) {
+            return;
+        }
+        ScheduleEntry o = rows.get(i);
+        JsonObject snap = new JsonObject();
+        if (o.poseSnapshot() != null && !o.poseSnapshot().isEmpty()) {
+            try {
+                JsonObject old = JsonParser.parseString(o.poseSnapshot()).getAsJsonObject();
+                if (old.has("pose")) {
+                    snap.add("pose", old.get("pose"));
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        JsonObject clean = cleanTransform(transform);
+        if (clean.size() > 0) {
+            snap.add("transform", clean);
+            if (freeze) {
+                snap.addProperty("freeze", true);
+            }
+        }
+        String s = (snap.has("pose") || snap.has("transform")) ? snap.toString() : "";
+        rows.set(i, new ScheduleEntry(o.time(), o.x(), o.y(), o.z(), o.pose(), o.radius(),
+                o.poseName(), s, o.emoteId(), o.emoteName(), o.emoteAuthor()));
+    }
+
+    private static JsonObject cleanTransform(JsonObject t) {
+        JsonObject out = new JsonObject();
+        for (String k : new String[]{"rot_x", "rot_y", "rot_z", "pos_x", "pos_y", "pos_z"}) {
+            if (t.has(k) && t.get(k).getAsFloat() != 0F) {
+                out.addProperty(k, t.get(k).getAsFloat());
+            }
+        }
+        for (String k : new String[]{"scale_x", "scale_y", "scale_z"}) {
+            if (t.has(k) && t.get(k).getAsFloat() != 1F) {
+                out.addProperty(k, t.get(k).getAsFloat());
+            }
+        }
+        return out;
+    }
+
+    private static void drawTransformIcon(GuiGraphics g, int ox, int oy, int c) {
+        g.fill(ox + 2, oy + 1, ox + 5, oy + 2, c);
+        g.fill(ox + 1, oy + 2, ox + 2, oy + 5, c);
+        g.fill(ox + 2, oy + 5, ox + 6, oy + 6, c);
+        g.fill(ox + 5, oy + 4, ox + 6, oy + 5, c);
+        g.fill(ox + 5, oy, ox + 8, oy + 1, c);
+        g.fill(ox + 7, oy, ox + 8, oy + 3, c);
+        g.fill(ox + 6, oy + 1, ox + 7, oy + 2, c);
+    }
+
     private static String buildSnapshot(PoseEntry e) {
         JsonObject snap = new JsonObject();
         try {
@@ -337,6 +481,11 @@ public class ScheduleScreen extends ScaledScreen {
             profileJson.addProperty("schedule_enabled", true);
         } else {
             profileJson.remove("schedule_enabled");
+        }
+        if (global) {
+            profileJson.addProperty("schedule_global", true);
+        } else {
+            profileJson.remove("schedule_global");
         }
     }
 

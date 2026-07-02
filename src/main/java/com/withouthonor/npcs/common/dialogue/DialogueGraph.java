@@ -6,6 +6,7 @@ import com.google.gson.JsonParseException;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -46,6 +47,49 @@ public class DialogueGraph {
 
     public Set<String> getPinnedNodes() {
         return pinnedNodes;
+    }
+
+    public boolean renameNode(String oldId, String newId) {
+        if (oldId == null || newId == null || oldId.equals(newId)
+                || !nodes.containsKey(oldId) || nodes.containsKey(newId)) {
+            return false;
+        }
+        Map<String, DialogueNode> rebuilt = new LinkedHashMap<>();
+        for (Map.Entry<String, DialogueNode> e : nodes.entrySet()) {
+            rebuilt.put(e.getKey().equals(oldId) ? newId : e.getKey(), e.getValue());
+        }
+        nodes.clear();
+        nodes.putAll(rebuilt);
+
+        if (oldId.equals(start)) {
+            start = newId;
+        }
+        if (pinnedNodes.remove(oldId)) {
+            pinnedNodes.add(newId);
+        }
+        for (DialogueNode n : nodes.values()) {
+            for (DialogueChoice c : n.getChoices()) {
+                if (oldId.equals(c.getNext())) {
+                    c.setNext(newId);
+                }
+            }
+            if (oldId.equals(n.getInputFallbackNext())) {
+                n.setInputFallbackNext(newId);
+            }
+            if (oldId.equals(n.getCheckSuccessNext())) {
+                n.setCheckSuccessNext(newId);
+            }
+            if (oldId.equals(n.getCheckFailNext())) {
+                n.setCheckFailNext(newId);
+            }
+            List<DialogueNode.RandomOption> opts = n.getRandomOptions();
+            for (int i = 0; i < opts.size(); i++) {
+                if (oldId.equals(opts.get(i).next())) {
+                    opts.set(i, new DialogueNode.RandomOption(opts.get(i).weight(), newId));
+                }
+            }
+        }
+        return true;
     }
 
     public String getAuthor() {

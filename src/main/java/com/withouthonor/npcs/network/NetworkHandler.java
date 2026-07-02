@@ -472,6 +472,12 @@ public class NetworkHandler {
                 .consumerMainThread(PoseLibraryPackets.Delete::handle)
                 .add();
 
+        CHANNEL.messageBuilder(PoseLibraryPackets.Rename.class, packetId++, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(PoseLibraryPackets.Rename::encode)
+                .decoder(PoseLibraryPackets.Rename::decode)
+                .consumerMainThread(PoseLibraryPackets.Rename::handle)
+                .add();
+
         CHANNEL.messageBuilder(RefreshDialoguesPacket.class, packetId++, NetworkDirection.PLAY_TO_SERVER)
                 .encoder(RefreshDialoguesPacket::encode)
                 .decoder(RefreshDialoguesPacket::decode)
@@ -524,6 +530,30 @@ public class NetworkHandler {
                 .encoder(RenameDialoguePacket::encode)
                 .decoder(RenameDialoguePacket::decode)
                 .consumerMainThread(RenameDialoguePacket::handle)
+                .add();
+
+        CHANNEL.messageBuilder(RenameNodePacket.class, packetId++, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(RenameNodePacket::encode)
+                .decoder(RenameNodePacket::decode)
+                .consumerMainThread(RenameNodePacket::handle)
+                .add();
+
+        CHANNEL.messageBuilder(GlobalSchedulePackets.Request.class, packetId++, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(GlobalSchedulePackets.Request::encode)
+                .decoder(GlobalSchedulePackets.Request::decode)
+                .consumerMainThread(GlobalSchedulePackets.Request::handle)
+                .add();
+
+        CHANNEL.messageBuilder(GlobalSchedulePackets.Data.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(GlobalSchedulePackets.Data::encode)
+                .decoder(GlobalSchedulePackets.Data::decode)
+                .consumerMainThread(GlobalSchedulePackets.Data::handle)
+                .add();
+
+        CHANNEL.messageBuilder(GlobalSchedulePackets.Action.class, packetId++, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(GlobalSchedulePackets.Action::encode)
+                .decoder(GlobalSchedulePackets.Action::decode)
+                .consumerMainThread(GlobalSchedulePackets.Action::handle)
                 .add();
     }
 

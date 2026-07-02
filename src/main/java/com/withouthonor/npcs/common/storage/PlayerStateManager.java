@@ -191,6 +191,21 @@ public class PlayerStateManager extends SavedData {
         }
     }
 
+    public void renameNode(String dialogueId, String oldNode, String newNode) {
+        String from = dialogueId + "/" + oldNode;
+        String to = dialogueId + "/" + newNode;
+        boolean changed = false;
+        for (PlayerState state : states.values()) {
+            if (state.visitedNodes.remove(from)) {
+                state.visitedNodes.add(to);
+                changed = true;
+            }
+        }
+        if (changed) {
+            setDirty();
+        }
+    }
+
     public int getReputation(UUID player, String faction) {
         PlayerState state = states.get(player);
         return state == null ? 0 : state.reputation.getOrDefault(faction, 0);

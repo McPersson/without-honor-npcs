@@ -26,3 +26,12 @@ forge*changelog.txt
 changelog.txt
 README.txt
 CREDITS.txt
+
+# dev notes (комментарии-раскопки, не для релиза)
+dev-notes/
+
+# patch notes (черновик, не для репозитория)
+PATCHNOTES-*.md
+
+# локальные jar'ы опциональных модов (Epic Fight и т.п.) — не заливаем, лицензия
+libs/

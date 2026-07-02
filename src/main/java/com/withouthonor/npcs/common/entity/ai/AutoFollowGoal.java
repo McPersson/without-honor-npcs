@@ -91,17 +91,36 @@ public class AutoFollowGoal extends Goal {
         float stop = stopDist();
         if (distSqr <= (double) (stop * stop)) {
             this.navigation.stop();
+            npc.setSprinting(false);
             return;
         }
         float teleport = teleportDist();
+        npc.setSprinting(isSprintSpeed(distSqr));
         if (--this.timeToRecalcPath <= 0) {
             this.timeToRecalcPath = adjustedTickDelay(10);
             if (distSqr >= (double) (teleport * teleport) && npc.shouldTeleportFollow()
                     && tryTeleportNearTarget()) {
                 return;
             }
-            navigation.moveTo(target, 1.0D);
+            navigation.moveTo(target, speedFor(distSqr));
         }
+    }
+
+    private double speedFor(double distSqr) {
+        double sprintAt = teleportDist() * 0.5;
+        if (npc.cfgRun() && distSqr >= sprintAt * sprintAt) {
+            return 1.45D;
+        }
+        if (npc.cfgMatchSpeed() && npc.cfgRun() && target.isSprinting()) {
+            return 1.3D;
+        }
+        return 1.0D;
+    }
+
+    private boolean isSprintSpeed(double distSqr) {
+        double sprintAt = teleportDist() * 0.5;
+        return npc.cfgRun() && (distSqr >= sprintAt * sprintAt
+                || (npc.cfgMatchSpeed() && target.isSprinting()));
     }
 
     @Nullable

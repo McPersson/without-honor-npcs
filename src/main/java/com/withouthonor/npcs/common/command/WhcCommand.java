@@ -167,6 +167,10 @@ public class WhcCommand {
                         .then(Commands.literal("clear")
                                 .then(Commands.argument("name", NameArgument.name()).suggests(NAME_SUGGESTIONS)
                                         .executes(ctx -> entryClear(ctx)))))
+                .then(Commands.literal("schedule")
+                        .then(Commands.literal("global")
+                                .then(Commands.argument("name", NameArgument.name()).suggests(NAME_SUGGESTIONS)
+                                        .executes(ctx -> scheduleGlobal(ctx)))))
                 .then(Commands.literal("flags")
                         .then(Commands.literal("get")
                                 .then(Commands.argument("player", EntityArgument.player())
@@ -534,6 +538,18 @@ public class WhcCommand {
         profile.getEntryPoints().clear();
         ProfileManager.get().save(profile);
         ctx.getSource().sendSuccess(() -> Component.translatable("wh_npcs.msg.command.entry_clear"), true);
+        return 1;
+    }
+
+    private static int scheduleGlobal(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        CompanionProfile profile = resolveProfile(ctx);
+        boolean on = !profile.isScheduleGlobal();
+        profile.setScheduleGlobal(on);
+        ProfileManager.get().save(profile);
+        com.withouthonor.npcs.common.profile.ProfileSync.applyToLoadedEntities(
+                ctx.getSource().getServer(), profile);
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Global schedule for \"" + profile.getName() + "\": " + (on ? "ON" : "OFF")), true);
         return 1;
     }
 

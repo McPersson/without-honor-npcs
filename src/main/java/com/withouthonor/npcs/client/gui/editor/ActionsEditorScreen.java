@@ -72,7 +72,9 @@ public class ActionsEditorScreen extends ScaledScreen {
             new TypeInfo("stop_follow", "wh_npcs.ui.act.type.stop_follow.label",
                     "wh_npcs.ui.act.type.stop_follow.desc", "wh_npcs.ui.act.type.stop_follow.detail"),
             new TypeInfo("follow_wait", "wh_npcs.ui.act.type.follow_wait.label",
-                    "wh_npcs.ui.act.type.follow_wait.desc", "wh_npcs.ui.act.type.follow_wait.detail"));
+                    "wh_npcs.ui.act.type.follow_wait.desc", "wh_npcs.ui.act.type.follow_wait.detail"),
+            new TypeInfo("effect", "wh_npcs.ui.act.type.effect.label",
+                    "wh_npcs.ui.act.type.effect.desc", "wh_npcs.ui.act.type.effect.detail"));
 
     private final Screen parent;
     private final List<DialogueAction> actions;
@@ -108,6 +110,10 @@ public class ActionsEditorScreen extends ScaledScreen {
     private String emoteDraftId = "";
     private String emoteDraftName = "";
     private String emoteDraftAuthor = "";
+
+    private String effectMode = "apply";
+    private boolean effectRemoveAll;
+    private List<Actions.EffectSpec> effectSpecs = new ArrayList<>();
 
     private EditBox monoNameBox;
     private EditBox monoPortraitBox;
@@ -392,6 +398,10 @@ public class ActionsEditorScreen extends ScaledScreen {
             emoteDraftId = em.emoteId();
             emoteDraftName = em.emoteName();
             emoteDraftAuthor = em.emoteAuthor();
+        } else if (action instanceof Actions.Effect eff) {
+            effectMode = eff.mode();
+            effectRemoveAll = eff.removeAll();
+            effectSpecs = new ArrayList<>(eff.effects());
         }
         monoLines = new ArrayList<>();
         monoPage = 0;
@@ -508,6 +518,8 @@ public class ActionsEditorScreen extends ScaledScreen {
                     }
                     actions.set(selected, new Actions.Monologue(List.copyOf(monoLines), monoLock));
                 }
+                case "effect" -> actions.set(selected,
+                        new Actions.Effect(effectMode, List.copyOf(effectSpecs), effectRemoveAll));
                 default -> {
                 }
             }
@@ -564,6 +576,7 @@ public class ActionsEditorScreen extends ScaledScreen {
             case "follow" -> new Actions.Follow();
             case "stop_follow" -> new Actions.StopFollow();
             case "follow_wait" -> new Actions.FollowWait();
+            case "effect" -> new Actions.Effect("apply", List.of(), false);
             case "run_command" -> new Actions.RunCommand(
                     Component.translatable("wh_npcs.ui.actions.command_hint").getString());
             case "sound" -> new Actions.Sound(
@@ -688,6 +701,16 @@ public class ActionsEditorScreen extends ScaledScreen {
         }
         if (action instanceof Actions.Title) {
             return Component.translatable("wh_npcs.ui.actions.sum_title").getString();
+        }
+        if (action instanceof Actions.Effect eff) {
+            if ("remove".equals(eff.mode())) {
+                return eff.removeAll()
+                        ? Component.translatable("wh_npcs.ui.actions.sum_effect_remove_all").getString()
+                        : Component.translatable("wh_npcs.ui.actions.sum_effect_remove",
+                                eff.effects().size()).getString();
+            }
+            return Component.translatable("wh_npcs.ui.actions.sum_effect_apply",
+                    eff.effects().size()).getString();
         }
         return action.type();
     }
@@ -867,6 +890,48 @@ public class ActionsEditorScreen extends ScaledScreen {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.mono_lock").getString(),
                         rightX + 18, cy + 2,
                         monoLock ? VanillaUIHelper.TEXT_WHITE : VanillaUIHelper.TEXT_DARK_GRAY, false);
+            }
+            case "effect" -> {
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.effect_caption").getString(),
+                        rightX, mainY + 2, VanillaUIHelper.TEXT_GRAY, false);
+                boolean apply = !"remove".equals(effectMode);
+                boolean applyHover = isOver(mouseX, mouseY, rightX, mainY + 18, 80, 18);
+                VanillaUIHelper.drawButton(g, rightX, mainY + 18, 80, 18, applyHover || apply);
+                g.drawCenteredString(font, Component.translatable("wh_npcs.ui.actions.effect_apply").getString(),
+                        rightX + 40, mainY + 23, apply ? VanillaUIHelper.TEXT_YELLOW
+                                : (applyHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA));
+                boolean removeHover = isOver(mouseX, mouseY, rightX + 86, mainY + 18, 80, 18);
+                VanillaUIHelper.drawButton(g, rightX + 86, mainY + 18, 80, 18, removeHover || !apply);
+                g.drawCenteredString(font, Component.translatable("wh_npcs.ui.actions.effect_remove").getString(),
+                        rightX + 126, mainY + 23, !apply ? VanillaUIHelper.TEXT_YELLOW
+                                : (removeHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA));
+                if (apply) {
+                    drawSmall(g, Component.translatable("wh_npcs.ui.actions.effect_pick").getString(),
+                            rightX, mainY + 46, 150, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                    g.drawString(font, Component.translatable("wh_npcs.ui.actions.effect_selected",
+                            effectSpecs.size()).getString(), rightX, mainY + 70, VanillaUIHelper.TEXT_WHITE, false);
+                    g.drawString(font, Component.translatable("wh_npcs.ui.actions.effect_apply_note").getString(),
+                            rightX, mainY + 82, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                } else {
+                    boolean allHover = isOver(mouseX, mouseY, rightX, mainY + 46, 180, 12);
+                    VanillaUIHelper.drawButton(g, rightX, mainY + 46, 12, 12, allHover);
+                    if (effectRemoveAll) {
+                        g.drawCenteredString(font, "§a✓", rightX + 6, mainY + 48, VanillaUIHelper.TEXT_WHITE);
+                    }
+                    g.drawString(font, Component.translatable("wh_npcs.ui.actions.effect_remove_all").getString(),
+                            rightX + 18, mainY + 48,
+                            effectRemoveAll ? VanillaUIHelper.TEXT_WHITE : VanillaUIHelper.TEXT_DARK_GRAY, false);
+                    if (!effectRemoveAll) {
+                        drawSmall(g, Component.translatable("wh_npcs.ui.actions.effect_pick").getString(),
+                                rightX, mainY + 68, 150, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                        g.drawString(font, Component.translatable("wh_npcs.ui.actions.effect_selected",
+                                effectSpecs.size()).getString(), rightX, mainY + 92,
+                                VanillaUIHelper.TEXT_WHITE, false);
+                    } else {
+                        g.drawString(font, Component.translatable("wh_npcs.ui.actions.effect_remove_all_note")
+                                .getString(), rightX, mainY + 68, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                    }
+                }
             }
             default -> g.drawString(font,
                     Component.translatable("wh_npcs.ui.actions.json_only", action.type()).getString(),
@@ -1124,6 +1189,55 @@ public class ActionsEditorScreen extends ScaledScreen {
                     if (isOver(mouseX, mouseY, rightX, mainY + 150, 132, 12)) {
                         monoLock = !monoLock;
                         writeBack();
+                        return true;
+                    }
+                }
+            }
+            case "effect" -> {
+                if (rightClick) {
+                    return false;
+                }
+                if (isOver(mouseX, mouseY, rightX, mainY + 18, 80, 18)) {
+                    effectMode = "apply";
+                    writeBack();
+                    return true;
+                }
+                if (isOver(mouseX, mouseY, rightX + 86, mainY + 18, 80, 18)) {
+                    effectMode = "remove";
+                    writeBack();
+                    return true;
+                }
+                boolean apply = !"remove".equals(effectMode);
+                if (apply) {
+                    if (isOver(mouseX, mouseY, rightX, mainY + 46, 150, 18)) {
+                        writeBack();
+                        if (minecraft != null) {
+                            minecraft.setScreen(EffectPickerScreen.forApply(this, effectSpecs, this::writeBack));
+                        }
+                        return true;
+                    }
+                } else {
+                    if (isOver(mouseX, mouseY, rightX, mainY + 46, 180, 12)) {
+                        effectRemoveAll = !effectRemoveAll;
+                        writeBack();
+                        return true;
+                    }
+                    if (!effectRemoveAll && isOver(mouseX, mouseY, rightX, mainY + 68, 150, 18)) {
+                        writeBack();
+                        if (minecraft != null) {
+                            List<ResourceLocation> ids = new ArrayList<>();
+                            for (Actions.EffectSpec spec : effectSpecs) {
+                                ids.add(spec.id());
+                            }
+                            minecraft.setScreen(new EffectPickerScreen(this, ids, () -> {
+                                List<Actions.EffectSpec> rebuilt = new ArrayList<>();
+                                for (ResourceLocation id : ids) {
+                                    rebuilt.add(new Actions.EffectSpec(id, 600, 0));
+                                }
+                                effectSpecs = rebuilt;
+                                writeBack();
+                            }));
+                        }
                         return true;
                     }
                 }

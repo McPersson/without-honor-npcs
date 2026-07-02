@@ -41,7 +41,7 @@ public class DialogueEditorScreen extends ScaledScreen {
 
     private com.withouthonor.npcs.client.gui.RichTextEditor pageBox;
     private boolean glossaryRequested;
-    private final List<EditBox> choiceBoxes = new ArrayList<>();
+    private final List<com.withouthonor.npcs.client.gui.RichTextEditor> choiceBoxes = new ArrayList<>();
     private final List<EditBox> targetBoxes = new ArrayList<>();
     private String statusText = "";
     private long statusUntil;
@@ -51,6 +51,12 @@ public class DialogueEditorScreen extends ScaledScreen {
     private int sortMode;
 
     private int draggingChoice = -1;
+
+    @Nullable
+    private String renamingNode;
+    @Nullable
+    private EditBox nodeRenameBox;
+    private final List<com.withouthonor.npcs.network.RenameNodePacket.Rename> pendingNodeRenames = new ArrayList<>();
 
     private record Issue(String text, @Nullable String nodeId) {
     }
@@ -140,6 +146,8 @@ public class DialogueEditorScreen extends ScaledScreen {
         clearWidgets();
         choiceBoxes.clear();
         targetBoxes.clear();
+        nodeRenameBox = null;
+        renamingNode = null;
 
         DialogueNode node = node();
         if (node.getPages().isEmpty()) {
@@ -165,10 +173,10 @@ public class DialogueEditorScreen extends ScaledScreen {
         for (int row = 0; row < visible; row++) {
             DialogueChoice choice = choices.get(choiceScroll + row);
             int y = choiceRowsY + row * CHOICE_ROW_H;
-            EditBox box = addRenderableWidget(new com.withouthonor.npcs.client.gui.SelectableEditBox(font, rightX, y,
-                    rightW - 252, 18, Component.translatable("wh_npcs.ui.dialogue_edit.choice_text")));
-            box.setMaxLength(120);
-            box.setValue(EditorCodes.toEditor(choice.getText()));
+            com.withouthonor.npcs.client.gui.RichTextEditor box = addRenderableWidget(
+                    new com.withouthonor.npcs.client.gui.RichTextEditor(font, rightX, y, rightW - 252, 18).singleLine());
+            box.setHint(Component.translatable("wh_npcs.ui.dialogue_edit.choice_text"));
+            box.setValue(choice.getText());
             choiceBoxes.add(box);
 
             EditBox target = addRenderableWidget(new com.withouthonor.npcs.client.gui.SelectableEditBox(font, rightX + rightW - 198, y,
@@ -229,7 +237,7 @@ public class DialogueEditorScreen extends ScaledScreen {
         for (int row = 0; row < choiceBoxes.size(); row++) {
             int idx = choiceScroll + row;
             if (idx < choices.size()) {
-                choices.get(idx).setText(EditorCodes.fromEditor(choiceBoxes.get(row).getValue()));
+                choices.get(idx).setText(choiceBoxes.get(row).getValue());
                 String target = targetBoxes.get(row).getValue().trim();
                 choices.get(idx).setNext(target.isEmpty() ? null : target);
             }
@@ -260,6 +268,53 @@ public class DialogueEditorScreen extends ScaledScreen {
         node.getPages().add("");
         graph.getNodes().put(id, node);
         selectNode(id);
+    }
+
+    private int renameIconX() {
+        return leftX + LEFT_W - 44;
+    }
+
+    private void startNodeRename(String id) {
+        collectCurrent();
+        renamingNode = id;
+        nodeRenameBox = addRenderableWidget(new com.withouthonor.npcs.client.gui.SelectableEditBox(
+                font, leftX + 4, leftY, LEFT_W - 12, NODE_ROW_H, Component.empty()));
+        nodeRenameBox.setMaxLength(64);
+        nodeRenameBox.setValue(id);
+        setFocused(nodeRenameBox);
+        nodeRenameBox.setFocused(true);
+    }
+
+    private void cancelNodeRename() {
+        if (nodeRenameBox != null) {
+            removeWidget(nodeRenameBox);
+            nodeRenameBox = null;
+        }
+        renamingNode = null;
+    }
+
+    private void commitNodeRename() {
+        if (renamingNode == null || nodeRenameBox == null) {
+            cancelNodeRename();
+            return;
+        }
+        String oldId = renamingNode;
+        String newId = nodeRenameBox.getValue().trim();
+        if (newId.equals(oldId)) {
+            cancelNodeRename();
+            return;
+        }
+        if (!newId.matches("[a-zA-Z0-9_.-]{1,64}") || graph.getNodes().containsKey(newId)
+                || !graph.renameNode(oldId, newId)) {
+            nodeRenameBox.setTextColor(0xFF5555);
+            return;
+        }
+        pendingNodeRenames.add(new com.withouthonor.npcs.network.RenameNodePacket.Rename(oldId, newId));
+        if (oldId.equals(selectedNodeId)) {
+            selectedNodeId = newId;
+        }
+        cancelNodeRename();
+        init(minecraft, width, height);
     }
 
     private void performDeleteNode() {
@@ -315,9 +370,17 @@ public class DialogueEditorScreen extends ScaledScreen {
     }
 
     private void save() {
+        if (renamingNode != null) {
+            commitNodeRename();
+        }
         collectCurrent();
         NetworkHandler.sendToServer(new SaveDialoguePacket(
                 graph.toJson().toString().getBytes(StandardCharsets.UTF_8)));
+        if (!pendingNodeRenames.isEmpty()) {
+            NetworkHandler.sendToServer(new com.withouthonor.npcs.network.RenameNodePacket(
+                    graph.getId(), new ArrayList<>(pendingNodeRenames)));
+            pendingNodeRenames.clear();
+        }
         flashStatus(Component.translatable("wh_npcs.ui.dialogue_edit.status_sent").getString());
 
         if (parent instanceof NpcEditorScreen hub) {
@@ -345,6 +408,7 @@ public class DialogueEditorScreen extends ScaledScreen {
                     issues.add(new Issue(Component.translatable("wh_npcs.ui.dialogue_edit.issue_choice_bad_target", nodeId, (i + 1), choice.getNext()).getString(), nodeId));
                 }
             }
+            addTransitionIssues(issues, nodeId, node);
             if (node.getChoices().isEmpty()) {
                 issues.add(new Issue(Component.translatable("wh_npcs.ui.dialogue_edit.issue_no_choices", nodeId).getString(), nodeId));
             }
@@ -360,11 +424,7 @@ public class DialogueEditorScreen extends ScaledScreen {
             }
             DialogueNode node = graph.getNode(id);
             if (node != null) {
-                for (DialogueChoice choice : node.getChoices()) {
-                    if (choice.getNext() != null) {
-                        queue.add(choice.getNext());
-                    }
-                }
+                queue.addAll(activeTargets(node));
             }
         }
         for (String id : graph.getNodes().keySet()) {
@@ -373,6 +433,74 @@ public class DialogueEditorScreen extends ScaledScreen {
             }
         }
         validationIssues = issues;
+    }
+
+    private void addTransitionIssues(List<Issue> issues, String nodeId, DialogueNode node) {
+        switch (node.getType()) {
+            case "input" -> checkTargetIssue(issues, nodeId, node.getInputFallbackNext(),
+                    "wh_npcs.ui.dialogue_edit.issue_input_bad_target");
+            case "check" -> {
+                checkTargetIssue(issues, nodeId, node.getCheckSuccessNext(),
+                        "wh_npcs.ui.dialogue_edit.issue_check_success_bad_target");
+                checkTargetIssue(issues, nodeId, node.getCheckFailNext(),
+                        "wh_npcs.ui.dialogue_edit.issue_check_fail_bad_target");
+            }
+            case "random" -> {
+                List<DialogueNode.RandomOption> opts = node.getRandomOptions();
+                for (int i = 0; i < opts.size(); i++) {
+                    String nx = opts.get(i).next();
+                    if (nx != null && !nx.isBlank() && !graph.getNodes().containsKey(nx)) {
+                        issues.add(new Issue(Component.translatable(
+                                "wh_npcs.ui.dialogue_edit.issue_random_bad_target", nodeId, (i + 1), nx).getString(), nodeId));
+                    }
+                }
+            }
+            default -> {
+            }
+        }
+    }
+
+    private void checkTargetIssue(List<Issue> issues, String nodeId, String target, String key) {
+        if (target != null && !target.isBlank() && !graph.getNodes().containsKey(target)) {
+            issues.add(new Issue(Component.translatable(key, nodeId, target).getString(), nodeId));
+        }
+    }
+
+    private List<String> activeTargets(DialogueNode node) {
+        List<String> out = new ArrayList<>();
+        String type = node.getType();
+        if (type.equals("text") || type.equals("input")) {
+            for (DialogueChoice c : node.getChoices()) {
+                if (c.getNext() != null) {
+                    out.add(c.getNext());
+                }
+            }
+        }
+        switch (type) {
+            case "input" -> {
+                if (!node.getInputFallbackNext().isBlank()) {
+                    out.add(node.getInputFallbackNext());
+                }
+            }
+            case "check" -> {
+                if (!node.getCheckSuccessNext().isBlank()) {
+                    out.add(node.getCheckSuccessNext());
+                }
+                if (!node.getCheckFailNext().isBlank()) {
+                    out.add(node.getCheckFailNext());
+                }
+            }
+            case "random" -> {
+                for (DialogueNode.RandomOption o : node.getRandomOptions()) {
+                    if (!o.next().isBlank()) {
+                        out.add(o.next());
+                    }
+                }
+            }
+            default -> {
+            }
+        }
+        return out;
     }
 
     @Override
@@ -509,6 +637,14 @@ public class DialogueEditorScreen extends ScaledScreen {
         int y = nodeListTop();
         for (int i = nodeScroll; i < Math.min(ids.size(), nodeScroll + visibleRows); i++) {
             String id = ids.get(i);
+            if (id.equals(renamingNode)) {
+                if (nodeRenameBox != null) {
+                    nodeRenameBox.setX(leftX + 4);
+                    nodeRenameBox.setY(y);
+                }
+                y += NODE_ROW_H;
+                continue;
+            }
             boolean selected = id.equals(selectedNodeId);
             boolean pinned = graph.getPinnedNodes().contains(id);
             boolean hovered = isOver(mouseX, mouseY, leftX + 2, y, LEFT_W - 4, NODE_ROW_H);
@@ -517,7 +653,7 @@ public class DialogueEditorScreen extends ScaledScreen {
                         selected ? VanillaUIHelper.BG_SELECTED : VanillaUIHelper.BG_HOVERED);
             }
             String label = (id.equals(graph.getStart()) ? "▶ " : "  ") + id;
-            g.drawString(font, font.plainSubstrByWidth(label, LEFT_W - 36), leftX + 4, y + 2,
+            g.drawString(font, font.plainSubstrByWidth(label, hovered ? LEFT_W - 50 : LEFT_W - 36), leftX + 4, y + 2,
                     selected ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE, false);
             if (pinned || hovered) {
                 boolean pinHover = isOver(mouseX, mouseY, pinIconX(), y + 1, 12, NODE_ROW_H - 2);
@@ -527,6 +663,12 @@ public class DialogueEditorScreen extends ScaledScreen {
                 }
             }
             if (hovered) {
+                boolean renHover = isOver(mouseX, mouseY, renameIconX(), y + 1, 12, NODE_ROW_H - 2);
+                VanillaUIHelper.drawRenameIcon(g, font, renameIconX(), y + 2,
+                        renHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GRAY);
+                if (renHover) {
+                    multilineTooltip(g, Component.translatable("wh_npcs.ui.dialogue_edit.node_rename_tip").getString(), mouseX, mouseY);
+                }
                 boolean iconHover = isOver(mouseX, mouseY, copyIconX(), y + 1, 12, NODE_ROW_H - 2);
                 drawCopyIcon(g, copyIconX(), y + 2, iconHover);
                 if (iconHover) {
@@ -753,7 +895,7 @@ public class DialogueEditorScreen extends ScaledScreen {
         }
 
         for (int row = 0; row < choiceBoxes.size(); row++) {
-            EditBox box = choiceBoxes.get(row);
+            com.withouthonor.npcs.client.gui.RichTextEditor box = choiceBoxes.get(row);
             box.setTooltip(font.width(box.getValue()) > box.getWidth() - 10
                     ? net.minecraft.client.gui.components.Tooltip.create(Component.literal(box.getValue()))
                     : null);
@@ -880,7 +1022,20 @@ public class DialogueEditorScreen extends ScaledScreen {
         }
         if (button == 0) {
             recalc();
+            if (renamingNode != null) {
+                if (nodeRenameBox != null && isOver(mouseX, mouseY, nodeRenameBox.getX(),
+                        nodeRenameBox.getY(), nodeRenameBox.getWidth(), nodeRenameBox.getHeight())) {
+                    return superMouseClicked(mouseX, mouseY, button);
+                }
+                commitNodeRename();
+                return true;
+            }
             if (scrollbars.click(mouseX, mouseY)) {
+                return true;
+            }
+
+            if (getFocused() instanceof com.withouthonor.npcs.client.gui.RichTextEditor rte
+                    && rte.clickToolbar(mouseX, mouseY)) {
                 return true;
             }
 
@@ -902,7 +1057,9 @@ public class DialogueEditorScreen extends ScaledScreen {
             for (int i = nodeScroll; i < Math.min(ids.size(), nodeScroll + visibleRows); i++) {
                 if (isOver(mouseX, mouseY, leftX + 2, y, LEFT_W - 4, NODE_ROW_H)) {
                     String id = ids.get(i);
-                    if (isOver(mouseX, mouseY, copyIconX(), y + 1, 12, NODE_ROW_H - 2) && minecraft != null) {
+                    if (isOver(mouseX, mouseY, renameIconX(), y + 1, 12, NODE_ROW_H - 2)) {
+                        startNodeRename(id);
+                    } else if (isOver(mouseX, mouseY, copyIconX(), y + 1, 12, NODE_ROW_H - 2) && minecraft != null) {
                         minecraft.keyboardHandler.setClipboard(id);
                         flashStatus(Component.translatable("wh_npcs.ui.dialogue_edit.id_copied", id).getString());
                     } else if (isOver(mouseX, mouseY, pinIconX(), y + 1, 12, NODE_ROW_H - 2)) {
@@ -1077,6 +1234,16 @@ public class DialogueEditorScreen extends ScaledScreen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (renamingNode != null) {
+            if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
+                commitNodeRename();
+                return true;
+            }
+            if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) {
+                cancelNodeRename();
+                return true;
+            }
+        }
         if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) {
             if (validationIssues != null) {
                 validationIssues = null;

@@ -20,8 +20,16 @@ public abstract class ScaledScreen extends Screen {
     private static double scissorCx;
     private static double scissorCy;
 
+    private List<Component> pendingTooltip;
+    private int rawMouseX;
+    private int rawMouseY;
+
     protected ScaledScreen(Component title) {
         super(title);
+    }
+
+    protected void queueTooltip(List<Component> lines) {
+        this.pendingTooltip = lines;
     }
 
     public static void enableScissor(GuiGraphics g, int x1, int y1, int x2, int y2) {
@@ -64,6 +72,9 @@ public abstract class ScaledScreen extends Screen {
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         renderDim(g);
         float s = uiScale();
+        this.rawMouseX = mouseX;
+        this.rawMouseY = mouseY;
+        this.pendingTooltip = null;
         int mx = (int) toDesignX(mouseX);
         int my = (int) toDesignY(mouseY);
         PoseStack pose = g.pose();
@@ -83,6 +94,10 @@ public abstract class ScaledScreen extends Screen {
         renderOverlay(g, mx, my, partialTick);
         scissorScale = 1F;
         pose.popPose();
+        if (this.pendingTooltip != null) {
+            g.renderComponentTooltip(this.font, this.pendingTooltip, this.rawMouseX, this.rawMouseY);
+            this.pendingTooltip = null;
+        }
     }
 
     protected abstract void renderContent(GuiGraphics g, int mouseX, int mouseY, float partialTick);

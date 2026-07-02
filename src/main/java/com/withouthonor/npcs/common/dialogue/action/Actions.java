@@ -71,6 +71,90 @@ public final class Actions {
         }
     }
 
+    public record EffectSpec(ResourceLocation id, int durationTicks, int amplifier) {
+
+        public static EffectSpec fromJson(JsonObject json) {
+            return new EffectSpec(
+                    ResourceLocation.parse(json.get("id").getAsString()),
+                    json.has("duration") ? json.get("duration").getAsInt() : 600,
+                    json.has("amplifier") ? json.get("amplifier").getAsInt() : 0);
+        }
+
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("id", id.toString());
+            json.addProperty("duration", durationTicks);
+            json.addProperty("amplifier", amplifier);
+            return json;
+        }
+    }
+
+    public record Effect(String mode, List<EffectSpec> effects, boolean removeAll) implements DialogueAction {
+
+        @Override
+        public String type() {
+            return "effect";
+        }
+
+        @Override
+        public void execute(DialogueCondition.Context ctx) {
+            ServerPlayer p = ctx.player();
+            if ("remove".equals(mode)) {
+                if (removeAll) {
+                    p.removeAllEffects();
+                    return;
+                }
+                for (EffectSpec s : effects) {
+                    net.minecraft.world.effect.MobEffect e = ForgeRegistries.MOB_EFFECTS.getValue(s.id());
+                    if (e != null) {
+                        p.removeEffect(e);
+                    }
+                }
+            } else {
+                for (EffectSpec s : effects) {
+                    net.minecraft.world.effect.MobEffect e = ForgeRegistries.MOB_EFFECTS.getValue(s.id());
+                    if (e != null) {
+                        int dur = s.durationTicks() <= 0 ? -1 : s.durationTicks();
+                        p.addEffect(new net.minecraft.world.effect.MobEffectInstance(
+                                e, dur, Math.max(0, s.amplifier())));
+                    }
+                }
+            }
+        }
+
+        public static Effect fromJson(JsonObject json) {
+            List<EffectSpec> effects = new ArrayList<>();
+            if (json.has("effects")) {
+                for (JsonElement e : json.getAsJsonArray("effects")) {
+                    try {
+                        effects.add(EffectSpec.fromJson(e.getAsJsonObject()));
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+            return new Effect(
+                    json.has("mode") ? json.get("mode").getAsString() : "apply",
+                    effects,
+                    json.has("remove_all") && json.get("remove_all").getAsBoolean());
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("type", type());
+            json.addProperty("mode", mode);
+            if (removeAll) {
+                json.addProperty("remove_all", true);
+            }
+            JsonArray arr = new JsonArray();
+            for (EffectSpec s : effects) {
+                arr.add(s.toJson());
+            }
+            json.add("effects", arr);
+            return json;
+        }
+    }
+
     public record GiveItem(List<ItemSpec> items) implements DialogueAction {
 
         @Override

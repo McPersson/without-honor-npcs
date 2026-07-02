@@ -26,7 +26,7 @@ import java.util.UUID;
 
 public class CompanionEntity extends PathfinderMob
         implements net.minecraft.world.item.trading.Merchant,
-        net.minecraft.world.entity.monster.RangedAttackMob {
+        net.minecraft.world.entity.monster.CrossbowAttackMob {
 
     private static final String TAG_PROFILE_ID = "ProfileId";
     private static final String TAG_FOLLOW = "FollowTarget";
@@ -83,6 +83,9 @@ public class CompanionEntity extends PathfinderMob
     private static final EntityDataAccessor<Boolean> DATA_TOTEM_ARMED =
             SynchedEntityData.defineId(CompanionEntity.class, EntityDataSerializers.BOOLEAN);
 
+    private static final EntityDataAccessor<Boolean> DATA_EF_MODE =
+            SynchedEntityData.defineId(CompanionEntity.class, EntityDataSerializers.BOOLEAN);
+
     private static final EntityDataAccessor<net.minecraft.world.item.ItemStack> DATA_ARROW =
             SynchedEntityData.defineId(CompanionEntity.class, EntityDataSerializers.ITEM_STACK);
 
@@ -123,12 +126,15 @@ public class CompanionEntity extends PathfinderMob
     private boolean cfgGroupSpacing = true;
     private int cfgDistanceTier = 1;
     private boolean cfgScheduleEnabled;
+    private boolean cfgScheduleGlobal;
     private java.util.List<com.withouthonor.npcs.common.profile.ScheduleEntry> cfgSchedule = java.util.List.of();
 
     private boolean cfgIdleLook;
     private boolean cfgIdleWander;
     private int cfgIdleWanderRadius;
     private boolean cfgPanic;
+    private boolean cfgPursueAttacker = true;
+    private boolean cfgHoldPosition;
     private boolean cfgAvoidSun;
     private boolean cfgBurnInSun;
     private int cfgTotemCharges;
@@ -179,6 +185,7 @@ public class CompanionEntity extends PathfinderMob
         this.entityData.define(DATA_PUSHABLE, false);
         this.entityData.define(DATA_PASSABLE, false);
         this.entityData.define(DATA_TOTEM_ARMED, false);
+        this.entityData.define(DATA_EF_MODE, false);
         this.entityData.define(DATA_ARROW, net.minecraft.world.item.ItemStack.EMPTY);
         this.entityData.define(DATA_TRANSFORM, new CompoundTag());
         this.entityData.define(DATA_POSE, new CompoundTag());
@@ -633,11 +640,12 @@ public class CompanionEntity extends PathfinderMob
     }
 
     public void applyCombatProfile(CompanionProfile profile) {
+        this.entityData.set(DATA_EF_MODE, "epicfight".equals(profile.getCombatSystem()));
         setAttr(Attributes.MAX_HEALTH, profile.getMaxHealth());
         setAttr(Attributes.ATTACK_DAMAGE, profile.getAttackDamage());
         setAttr(Attributes.ARMOR, profile.getArmor());
         setAttr(Attributes.KNOCKBACK_RESISTANCE, profile.getKbResistance());
-        setAttr(Attributes.MOVEMENT_SPEED, profile.getMoveSpeed());
+        setAttr(Attributes.MOVEMENT_SPEED, profile.isHoldPosition() ? 0.0D : profile.getMoveSpeed());
         if (getHealth() > getMaxHealth()) {
             setHealth(getMaxHealth());
         }
@@ -650,7 +658,11 @@ public class CompanionEntity extends PathfinderMob
         }
         cacheFollowSettings(profile);
 
-        getAttribute(Attributes.FOLLOW_RANGE).setBaseValue(cfgAggroRange > 0 ? cfgAggroRange : 16.0D);
+        double followRange = cfgAggroRange > 0 ? cfgAggroRange : 16.0D;
+        if ("bow".equals(profile.getCombatPreset())) {
+            followRange = Math.max(followRange, profile.getRangedRange() + 8.0F);
+        }
+        getAttribute(Attributes.FOLLOW_RANGE).setBaseValue(followRange);
 
         this.goalSelector.getAvailableGoals().forEach(net.minecraft.world.entity.ai.goal.WrappedGoal::stop);
         this.targetSelector.getAvailableGoals().forEach(net.minecraft.world.entity.ai.goal.WrappedGoal::stop);
@@ -667,11 +679,32 @@ public class CompanionEntity extends PathfinderMob
         this.targetSelector.addGoal(1,
                 new net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal(this));
 
-        if ("bow".equals(preset) && hasRangedWeapon()) {
+        boolean ef = com.withouthonor.npcs.compat.Compat.epicFightLoaded()
+                && "epicfight".equals(profile.getCombatSystem());
+        if (!ef) {
+        if ("bow".equals(preset)) {
             int interval = Math.max(5, Math.round(profile.getRangedIntervalSeconds() * 20.0F));
             float range = profile.getRangedRange();
-            this.goalSelector.addGoal(2, new net.minecraft.world.entity.ai.goal.RangedAttackGoal(
-                    this, 1.0D, interval, range));
+            net.minecraft.world.item.Item weapon =
+                    getFunctionalItem(net.minecraft.world.entity.EquipmentSlot.MAINHAND).getItem();
+            net.minecraft.world.item.Item ammo = getArrowItem().getItem();
+            boolean throwableAmmo = ammo instanceof net.minecraft.world.item.SnowballItem
+                    || ammo instanceof net.minecraft.world.item.EggItem;
+            if (weapon instanceof net.minecraft.world.item.CrossbowItem) {
+                this.goalSelector.addGoal(2, new com.withouthonor.npcs.common.entity.ai.NpcCrossbowAttackGoal(
+                        this, 1.0D, range));
+            } else if (weapon instanceof net.minecraft.world.item.BowItem) {
+                this.goalSelector.addGoal(2, new com.withouthonor.npcs.common.entity.ai.NpcBowAttackGoal(
+                        this, 1.0D, interval, range));
+            } else if (weapon instanceof net.minecraft.world.item.TridentItem) {
+                this.goalSelector.addGoal(2, new com.withouthonor.npcs.common.entity.ai.NpcTridentAttackGoal(
+                        this, 1.0D, interval, range));
+            } else if (throwableAmmo) {
+                this.goalSelector.addGoal(2, new net.minecraft.world.entity.ai.goal.RangedAttackGoal(
+                        this, 1.0D, interval, range));
+            } else {
+                addMeleeGoals(profile);
+            }
         } else if ("potion".equals(preset)) {
             int pInterval = Math.max(5, Math.round(profile.getPotionIntervalSeconds() * 20.0F));
             float pRange = profile.getPotionRange();
@@ -683,18 +716,13 @@ public class CompanionEntity extends PathfinderMob
                         new com.withouthonor.npcs.common.entity.ai.WitchHealGoal(this));
             }
         } else {
-
-            if (cfgLeap) {
-                this.goalSelector.addGoal(2,
-                        new net.minecraft.world.entity.ai.goal.LeapAtTargetGoal(this, profile.getLeapStrength()));
-            }
-            this.goalSelector.addGoal(2, new net.minecraft.world.entity.ai.goal.MeleeAttackGoal(
-                    this, profile.getMeleeChaseSpeed(), false));
+            addMeleeGoals(profile);
         }
 
         if ("shield".equals(preset)) {
             this.goalSelector.addGoal(1, new com.withouthonor.npcs.common.entity.ai.ShieldBlockGoal(
                     this, cfgShieldHoldTicks, cfgShieldCooldownTicks));
+        }
         }
 
         java.util.Set<String> cats = CompanionProfile.parseAggressorTargets(profile.getAggressorTargets());
@@ -711,6 +739,19 @@ public class CompanionEntity extends PathfinderMob
                     this, net.minecraft.world.entity.LivingEntity.class, 10, true, false,
                     this::isHostileFactionTarget));
         }
+
+        if (ef) {
+            com.withouthonor.npcs.compat.epicfight.EpicFightCompat.installMobCombat(this);
+        }
+    }
+
+    private void addMeleeGoals(CompanionProfile profile) {
+        if (cfgLeap) {
+            this.goalSelector.addGoal(2,
+                    new net.minecraft.world.entity.ai.goal.LeapAtTargetGoal(this, profile.getLeapStrength()));
+        }
+        this.goalSelector.addGoal(2, new net.minecraft.world.entity.ai.goal.MeleeAttackGoal(
+                this, profile.getMeleeChaseSpeed(), false));
     }
 
     private boolean isHostileFactionTarget(net.minecraft.world.entity.LivingEntity target) {
@@ -770,6 +811,18 @@ public class CompanionEntity extends PathfinderMob
         return false;
     }
 
+    public boolean isConfiguredAggressorTarget(net.minecraft.world.entity.LivingEntity e) {
+        CompanionProfile profile = profileId != null ? ProfileManager.get().get(profileId) : null;
+        if (profile == null) {
+            return false;
+        }
+        java.util.Set<String> cats = CompanionProfile.parseAggressorTargets(profile.getAggressorTargets());
+        if (matchesAggressorCategory(e, cats)) {
+            return true;
+        }
+        return cats.contains("factions") && isHostileFactionTarget(e);
+    }
+
     private boolean isHostileNpc(net.minecraft.world.entity.LivingEntity target) {
         if (!(target instanceof CompanionEntity other) || profileId == null || other.getProfileId() == null) {
             return false;
@@ -805,17 +858,41 @@ public class CompanionEntity extends PathfinderMob
             throwSplashAt(target, harmfulBeltPotion());
             return;
         }
-        net.minecraft.world.item.ItemStack ammo = getArrowItem();
         double dx = target.getX() - getX();
         double dz = target.getZ() - getZ();
         double horizontal = Math.sqrt(dx * dx + dz * dz);
+        net.minecraft.world.item.ItemStack weapon =
+                getFunctionalItem(net.minecraft.world.entity.EquipmentSlot.MAINHAND);
+        if (weapon.getItem() instanceof net.minecraft.world.item.TridentItem) {
+            var trident = new net.minecraft.world.entity.projectile.ThrownTrident(level(), this, weapon.copy());
+            trident.pickup = net.minecraft.world.entity.projectile.AbstractArrow.Pickup.DISALLOWED;
+            double dy = target.getY(0.3333333333333333D) - trident.getY();
+            trident.shoot(dx, dy + horizontal * 0.2D, dz, 1.6F, 4.0F);
+            playSound(net.minecraft.sounds.SoundEvents.DROWNED_SHOOT, 1.0F,
+                    1.0F / (getRandom().nextFloat() * 0.4F + 0.8F));
+            level().addFreshEntity(trident);
+            return;
+        }
+        net.minecraft.world.item.ItemStack ammo = getArrowItem();
         if (ammo.getItem() instanceof net.minecraft.world.item.SnowballItem) {
             var snowball = new net.minecraft.world.entity.projectile.Snowball(level(), this);
-            double dy = target.getEyeY() - snowball.getY();
-            snowball.shoot(dx, dy + horizontal * 0.2D, dz, 1.5F, 6.0F);
+            double dy = target.getY(0.3333333333333333D) - snowball.getY();
+            snowball.shoot(dx, dy + horizontal * 0.13D, dz, 1.6F, 6.0F);
             playSound(net.minecraft.sounds.SoundEvents.SNOWBALL_THROW, 1.0F,
                     1.0F / (getRandom().nextFloat() * 0.4F + 0.8F));
             level().addFreshEntity(snowball);
+            swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+            return;
+        }
+        if (ammo.getItem() instanceof net.minecraft.world.item.EggItem) {
+            var egg = new net.minecraft.world.entity.projectile.ThrownEgg(level(), this);
+            egg.setItem(ammo);
+            double dy = target.getY(0.3333333333333333D) - egg.getY();
+            egg.shoot(dx, dy + horizontal * 0.13D, dz, 1.6F, 6.0F);
+            playSound(net.minecraft.sounds.SoundEvents.EGG_THROW, 1.0F,
+                    1.0F / (getRandom().nextFloat() * 0.4F + 0.8F));
+            level().addFreshEntity(egg);
+            swing(net.minecraft.world.InteractionHand.MAIN_HAND);
             return;
         }
         net.minecraft.world.item.ItemStack arrowStack =
@@ -828,6 +905,53 @@ public class CompanionEntity extends PathfinderMob
         playSound(net.minecraft.sounds.SoundEvents.SKELETON_SHOOT, 1.0F,
                 1.0F / (getRandom().nextFloat() * 0.4F + 0.8F));
         level().addFreshEntity(arrow);
+    }
+
+    private boolean chargingCrossbow;
+
+    @Override
+    public void setChargingCrossbow(boolean charging) {
+        this.chargingCrossbow = charging;
+    }
+
+    public boolean isChargingCrossbow() {
+        return this.chargingCrossbow;
+    }
+
+    @Override
+    public void shootCrossbowProjectile(net.minecraft.world.entity.LivingEntity target,
+                                        net.minecraft.world.item.ItemStack weapon,
+                                        net.minecraft.world.entity.projectile.Projectile projectile,
+                                        float projectileAngle) {
+        net.minecraft.world.entity.LivingEntity aim = target != null ? target : getTarget();
+        if (aim != null) {
+            this.shootCrossbowProjectile(this, aim, projectile, projectileAngle, 1.6F);
+            return;
+        }
+        net.minecraft.world.phys.Vec3 look = getViewVector(1.0F);
+        projectile.shoot(look.x, look.y, look.z, 1.6F, 1.0F);
+    }
+
+    @Override
+    public void onCrossbowAttackPerformed() {
+        this.noActionTime = 0;
+    }
+
+    @Override
+    public net.minecraft.world.item.ItemStack getProjectile(net.minecraft.world.item.ItemStack weapon) {
+        if (!(weapon.getItem() instanceof net.minecraft.world.item.ProjectileWeaponItem pw)) {
+            return net.minecraft.world.item.ItemStack.EMPTY;
+        }
+        net.minecraft.world.item.ItemStack held = net.minecraft.world.item.ProjectileWeaponItem
+                .getHeldProjectile(this, pw.getSupportedHeldProjectiles());
+        if (!held.isEmpty()) {
+            return held;
+        }
+        net.minecraft.world.item.ItemStack arrow = getArrowItem();
+        if (arrow.getItem() instanceof net.minecraft.world.item.ArrowItem) {
+            return arrow.copy();
+        }
+        return new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.ARROW);
     }
 
     private void setAttr(net.minecraft.world.entity.ai.attributes.Attribute attribute, double value) {
@@ -877,6 +1001,9 @@ public class CompanionEntity extends PathfinderMob
     protected void registerGoals() {
 
         this.goalSelector.addGoal(0, new FloatGoal(this));
+
+        this.goalSelector.addGoal(2,
+                new com.withouthonor.npcs.common.entity.ai.PursueAttackerGoal(this));
 
         this.goalSelector.addGoal(3,
                 new com.withouthonor.npcs.common.entity.ai.FollowPlayerGoal(this));
@@ -951,6 +1078,7 @@ public class CompanionEntity extends PathfinderMob
         cfgTeleportFx = profile.isTeleportFx();
         cfgGroupSpacing = profile.isGroupSpacing();
         cfgScheduleEnabled = profile.isScheduleEnabled();
+        cfgScheduleGlobal = profile.isScheduleGlobal();
         cfgSchedule = java.util.List.copyOf(profile.getSchedule());
 
         cfgBasePose = new PoseJson.Pose();
@@ -960,6 +1088,8 @@ public class CompanionEntity extends PathfinderMob
                 profile.getPosX(), profile.getPosY(), profile.getPosZ(),
                 profile.getScaleX(), profile.getScaleY(), profile.getScaleZ()};
         cfgIdleLook = profile.isIdleLook();
+        cfgPursueAttacker = profile.isPursueAttacker();
+        cfgHoldPosition = profile.isHoldPosition();
         cfgIdleWander = profile.isIdleWander();
         cfgIdleWanderRadius = profile.getIdleWanderRadius();
         cfgPanic = profile.isPanicWhenHurt();
@@ -1090,6 +1220,14 @@ public class CompanionEntity extends PathfinderMob
         if (damaged && !level().isClientSide && !cfgOnHurt.isEmpty()) {
             runReactions(cfgOnHurt, source.getEntity() instanceof ServerPlayer sp ? sp : nearestServerPlayer(16));
         }
+        if (damaged && !level().isClientSide && cfgPursueAttacker && getTarget() == null
+                && source.getEntity() instanceof net.minecraft.world.entity.LivingEntity attacker
+                && attacker != this && isConfiguredAggressorTarget(attacker)) {
+            double follow = getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.FOLLOW_RANGE);
+            if (distanceToSqr(attacker) > follow * follow) {
+                setPursuitTarget(attacker);
+            }
+        }
         return damaged;
     }
 
@@ -1163,8 +1301,18 @@ public class CompanionEntity extends PathfinderMob
         return cfgSchedule;
     }
 
+    private boolean scheduleYawFrozen;
+
+    public void setScheduleYawFrozen(boolean frozen) {
+        this.scheduleYawFrozen = frozen;
+    }
+
     public boolean isSitting() {
         return this.entityData.get(DATA_SITTING);
+    }
+
+    public boolean isEpicFightMode() {
+        return this.entityData.get(DATA_EF_MODE);
     }
 
     public void setSitting(boolean sitting) {
@@ -1262,6 +1410,36 @@ public class CompanionEntity extends PathfinderMob
 
     public boolean cfgMatchSpeed() {
         return cfgMatchSpeed;
+    }
+
+    public boolean cfgPursueAttacker() {
+        return cfgPursueAttacker;
+    }
+
+    public boolean cfgHoldPosition() {
+        return cfgHoldPosition;
+    }
+
+    @javax.annotation.Nullable
+    private net.minecraft.world.entity.LivingEntity pursuitTarget;
+    private int pursuitExpireTick;
+
+    public void setPursuitTarget(net.minecraft.world.entity.LivingEntity attacker) {
+        this.pursuitTarget = attacker;
+        this.pursuitExpireTick = this.tickCount + 240;
+    }
+
+    @javax.annotation.Nullable
+    public net.minecraft.world.entity.LivingEntity getPursuitTarget() {
+        return this.pursuitTarget;
+    }
+
+    public int getPursuitExpireTick() {
+        return this.pursuitExpireTick;
+    }
+
+    public void clearPursuitTarget() {
+        this.pursuitTarget = null;
     }
 
     public boolean cfgTeleportOutOfSight() {
@@ -1596,7 +1774,38 @@ public class CompanionEntity extends PathfinderMob
                 followTargetId = null;
                 followMode = com.withouthonor.npcs.common.entity.ai.FollowMode.NONE;
             }
+
+            if (cfgScheduleGlobal && tickCount % 40 == 13 && scheduleActive()
+                    && level().getServer() != null) {
+                com.withouthonor.npcs.common.storage.GlobalScheduleManager
+                        .get(level().getServer()).update(this);
+            }
+
+            if (cfgHoldPosition) {
+                net.minecraft.world.entity.LivingEntity holdT = getTarget();
+                if (holdT != null && holdT.isAlive()) {
+                    double dx = holdT.getX() - getX();
+                    double dz = holdT.getZ() - getZ();
+                    float desired = (float) (net.minecraft.util.Mth.atan2(dz, dx) * (180.0D / Math.PI)) - 90.0F;
+                    this.yBodyRot = turnTowards(this.yBodyRot, desired, 12.0F);
+                }
+            }
+
+            if (scheduleYawFrozen) {
+                setYRot(0F);
+                this.yRotO = 0F;
+                this.yBodyRot = 0F;
+                this.yBodyRotO = 0F;
+                setYHeadRot(0F);
+                this.yHeadRotO = 0F;
+            }
         }
+    }
+
+    private static float turnTowards(float from, float to, float maxDelta) {
+        float d = net.minecraft.util.Mth.wrapDegrees(to - from);
+        d = net.minecraft.util.Mth.clamp(d, -maxDelta, maxDelta);
+        return from + d;
     }
 
     private void applyRegen() {
@@ -1917,7 +2126,7 @@ public class CompanionEntity extends PathfinderMob
         this.entityData.set(DATA_EMOTECRAFT_EMOTE, packEmote(emoteId, emoteName, emoteAuthor));
     }
 
-    private static final char EMOTE_SEP = (char) 31; //'';
+    private static final char EMOTE_SEP = (char) 31;
 
     public static String packEmote(String id, String name, String author) {
         if (id == null || id.isEmpty()) {

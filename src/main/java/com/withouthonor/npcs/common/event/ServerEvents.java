@@ -48,8 +48,11 @@ public class ServerEvents {
             return;
         }
         var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
-        if (server != null && server.getTickCount() % 20 == 0) {
-            com.withouthonor.npcs.common.storage.Graveyard.get(server).tickRespawns(server);
+        if (server != null) {
+            if (server.getTickCount() % 20 == 0) {
+                com.withouthonor.npcs.common.storage.Graveyard.get(server).tickRespawns(server);
+            }
+            com.withouthonor.npcs.common.storage.GlobalScheduleManager.get(server).tick(server);
         }
     }
 

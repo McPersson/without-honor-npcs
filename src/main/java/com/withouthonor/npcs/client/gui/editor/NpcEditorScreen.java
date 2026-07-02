@@ -362,7 +362,15 @@ public class NpcEditorScreen extends ScaledScreen {
     }
 
     private int combatRightX() {
-        return contentX + 220;
+        return contentX + 232;
+    }
+
+    private int tabGap() {
+        int total = 0;
+        for (String key : TAB_KEYS) {
+            total += font.width(tr(key)) + 16;
+        }
+        return Math.max(2, (winW - PAD * 2 - total) / (TAB_KEYS.length - 1));
     }
 
     private EditBox combatBox(int x, int y, int w, String key, float def, float min, float max) {
@@ -383,28 +391,28 @@ public class NpcEditorScreen extends ScaledScreen {
 
     private void buildCombatWidgets() {
         int fx = contentX + 8;
-        hpBox = combatBox(fx + 50, contentY + 22, 40, "max_health", 20.0F, 1.0F, 1024.0F);
+        hpBox = combatBox(fx + 50, contentY + 18, 40, "max_health", 20.0F, 1.0F, 1024.0F);
         hpBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
                 Component.translatable("wh_npcs.ui.npc.tip_health")));
-        dmgBox = combatBox(fx + 142, contentY + 22, 40, "attack_damage", 3.0F, 0.0F, 1024.0F);
+        dmgBox = combatBox(fx + 150, contentY + 18, 40, "attack_damage", 3.0F, 0.0F, 1024.0F);
         dmgBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
                 Component.translatable("wh_npcs.ui.npc.tip_damage")));
-        armorBox = combatBox(fx + 50, contentY + 44, 40, "armor", 0.0F, 0.0F, 30.0F);
+        armorBox = combatBox(fx + 50, contentY + 40, 40, "armor", 0.0F, 0.0F, 30.0F);
         armorBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
                 Component.translatable("wh_npcs.ui.npc.tip_armor")));
-        kbBox = combatBox(fx + 142, contentY + 44, 40, "kb_resistance", 0.0F, 0.0F, 1.0F);
+        kbBox = combatBox(fx + 150, contentY + 40, 40, "kb_resistance", 0.0F, 0.0F, 1.0F);
         kbBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
                 Component.translatable("wh_npcs.ui.npc.tip_kb")));
-        speedBox = combatBox(fx + 50, contentY + 66, 40, "move_speed", 0.25F, 0.0F, 1.0F);
+        speedBox = combatBox(fx + 50, contentY + 62, 40, "move_speed", 0.25F, 0.0F, 1.0F);
         speedBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
                 Component.translatable("wh_npcs.ui.npc.tip_speed")));
-        regenBox = combatBox(fx + 50, contentY + 108, 40, "regen_per_second", 0.0F, 0.0F, 100.0F);
+        regenBox = combatBox(fx + 150, contentY + 62, 40, "regen_per_second", 0.0F, 0.0F, 100.0F);
         regenBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
                 Component.translatable("wh_npcs.ui.npc.tip_regen")));
-        totemChargesBox = combatBox(fx + 92, contentY + 200, 30, "totem_charges", 0.0F, 0.0F, 99.0F);
+        totemChargesBox = combatBox(fx + 376, contentY + 205, 30, "totem_charges", 0.0F, 0.0F, 99.0F);
         int rx = combatRightX();
-        xpMinBox = combatBox(rx + 64, contentY + 56, 34, "death_xp_min", 0.0F, 0.0F, 10000.0F);
-        xpMaxBox = combatBox(rx + 120, contentY + 56, 34, "death_xp_max", 0.0F, 0.0F, 10000.0F);
+        xpMinBox = combatBox(rx + 64, contentY + 147, 34, "death_xp_min", 0.0F, 0.0F, 10000.0F);
+        xpMaxBox = combatBox(rx + 124, contentY + 147, 34, "death_xp_max", 0.0F, 0.0F, 10000.0F);
         xpMaxBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
                 Component.translatable("wh_npcs.ui.npc.tip_xp")));
     }
@@ -945,6 +953,14 @@ public class NpcEditorScreen extends ScaledScreen {
         g.drawString(font, tr("wh_npcs.ui.npc.bh_applies_note"),
                 c1, contentY + 134, VanillaUIHelper.TEXT_WHITE, false);
 
+        g.drawString(font, tr("wh_npcs.ui.npc.bh_combat_header"), c1, contentY + 156, VanillaUIHelper.TEXT_GRAY, false);
+        t = behaviorToggle(g, c1, contentY + 174, "pursue_attacker", tr("wh_npcs.ui.npc.bh_pursue"), mouseX, mouseY,
+                tr("wh_npcs.ui.npc.bh_pursue_tip"));
+        if (t != null) tooltip = t;
+        t = behaviorToggleOff(g, c2, contentY + 174, "hold_position", tr("wh_npcs.ui.npc.bh_hold"), mouseX, mouseY,
+                tr("wh_npcs.ui.npc.bh_hold_tip"));
+        if (t != null) tooltip = t;
+
         boolean schedHover = isOver(mouseX, mouseY, c1, contentY + 200, 160, 18);
         VanillaUIHelper.drawButton(g, c1, contentY + 200, 160, 18, schedHover);
         g.drawCenteredString(font, tr("wh_npcs.ui.npc.bh_schedule"), c1 + 80, contentY + 205,
@@ -1003,6 +1019,31 @@ public class NpcEditorScreen extends ScaledScreen {
         return false;
     }
 
+    private String behaviorToggleOff(GuiGraphics g, int x, int y, String key, String label,
+                                     int mouseX, int mouseY, String tip) {
+        boolean on = profileJson.has(key) && profileJson.get(key).getAsBoolean();
+        boolean boxHover = isOver(mouseX, mouseY, x, y, 12, 12);
+        VanillaUIHelper.drawButton(g, x, y, 12, 12, boxHover);
+        if (on) {
+            VanillaUIHelper.drawCheck(g, x + 1, y + 2, VanillaUIHelper.TEXT_GREEN);
+        }
+        g.drawString(font, label, x + 16, y + 2, VanillaUIHelper.TEXT_GRAY, false);
+        boolean labelHover = isOver(mouseX, mouseY, x + 16, y, Math.min(170, font.width(label) + 6), 12);
+        return boxHover || labelHover ? tip : null;
+    }
+
+    private boolean behaviorToggleClickOff(double mx, double my, int x, int y, String key) {
+        if (isOver(mx, my, x, y, 12, 12)) {
+            if (profileJson.has(key) && profileJson.get(key).getAsBoolean()) {
+                profileJson.remove(key);
+            } else {
+                profileJson.addProperty(key, true);
+            }
+            return true;
+        }
+        return false;
+    }
+
     private boolean handleBehaviorClick(double mx, double my, int button) {
         if (button != 0) {
             return false;
@@ -1017,6 +1058,8 @@ public class NpcEditorScreen extends ScaledScreen {
         if (behaviorToggleClick(mx, my, c2, contentY + 62, "avoid_danger")) return true;
         if (behaviorToggleClick(mx, my, c1, contentY + 82, "teleport_fx")) return true;
         if (behaviorToggleClick(mx, my, c2, contentY + 82, "group_spacing")) return true;
+        if (behaviorToggleClick(mx, my, c1, contentY + 174, "pursue_attacker")) return true;
+        if (behaviorToggleClickOff(mx, my, c2, contentY + 174, "hold_position")) return true;
         if (isOver(mx, my, c1 + 66, contentY + 106, 96, 18)) {
             String dist = profileJson.has("follow_distance")
                     ? profileJson.get("follow_distance").getAsString() : "normal";
@@ -1058,82 +1101,41 @@ public class NpcEditorScreen extends ScaledScreen {
     private void renderCombatTab(GuiGraphics g, int mouseX, int mouseY) {
         String tooltip = null;
         int fx = contentX + 8;
-        boolean attackable = profileJson.has("attackable") && profileJson.get("attackable").getAsBoolean();
+        int rx = combatRightX();
+        boolean ef = com.withouthonor.npcs.compat.Compat.epicFightLoaded();
 
-        boolean checkHover = isOver(mouseX, mouseY, fx, contentY + 3, 12, 12);
-        VanillaUIHelper.drawButton(g, fx, contentY + 3, 12, 12, checkHover);
-        if (attackable) {
-            VanillaUIHelper.drawCheck(g, fx + 1, contentY + 5, VanillaUIHelper.TEXT_GREEN);
-        }
-        g.drawString(font, attackable ? tr("wh_npcs.ui.npc.attackable_on") : tr("wh_npcs.ui.npc.attackable_off"),
-                fx + 18, contentY + 5, VanillaUIHelper.TEXT_GRAY, false);
-        if (checkHover || isOver(mouseX, mouseY, fx + 18, contentY + 3, 110, 12)) {
-            tooltip = tr("wh_npcs.ui.npc.attackable_tip");
-        }
+        g.fill(contentX + 222, contentY + 2, contentX + 223, contentY + 184, 0xFF373737);
 
-        drawHeart(g, fx, contentY + 26, 0xFFFF5555);
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_hp"), fx + 11, contentY + 25, VanillaUIHelper.TEXT_GRAY, false);
-        drawSwordIcon(g, fx + 96, contentY + 25, 0xFFCCCCCC);
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_damage"), fx + 107, contentY + 25, VanillaUIHelper.TEXT_GRAY, false);
-        drawChestplateIcon(g, fx, contentY + 47, 0xFF7FB2F0);
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_armor"), fx + 11, contentY + 47, VanillaUIHelper.TEXT_GRAY, false);
-        drawKnockbackIcon(g, fx + 96, contentY + 47, 0xFFD8A657);
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_kb"), fx + 107, contentY + 47, VanillaUIHelper.TEXT_GRAY, false);
-        drawBootIcon(g, fx, contentY + 69, 0xFFB08968);
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_speed"), fx + 11, contentY + 69, VanillaUIHelper.TEXT_GRAY, false);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_sec_stats"), fx, contentY + 2, VanillaUIHelper.TEXT_GRAY, false);
+        VanillaUIHelper.drawSeparator(g, fx, contentY + 12, 206);
 
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_style"), fx, contentY + 91, VanillaUIHelper.TEXT_GRAY, false);
+        drawHeart(g, fx, contentY + 21, 0xFFFF5555);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_hp"), fx + 11, contentY + 21, VanillaUIHelper.TEXT_GRAY, false);
+        drawSwordIcon(g, fx + 104, contentY + 21, 0xFFCCCCCC);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_damage"), fx + 115, contentY + 21, VanillaUIHelper.TEXT_GRAY, false);
+        drawChestplateIcon(g, fx, contentY + 43, 0xFF7FB2F0);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_armor"), fx + 11, contentY + 43, VanillaUIHelper.TEXT_GRAY, false);
+        drawKnockbackIcon(g, fx + 104, contentY + 43, 0xFFD8A657);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_kb"), fx + 115, contentY + 43, VanillaUIHelper.TEXT_GRAY, false);
+        drawBootIcon(g, fx, contentY + 65, 0xFFB08968);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_speed"), fx + 11, contentY + 65, VanillaUIHelper.TEXT_GRAY, false);
+        drawHeart(g, fx + 104, contentY + 65, 0xFF55FF55);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_regen"), fx + 115, contentY + 65, VanillaUIHelper.TEXT_GRAY, false);
+
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_sec_behavior"), fx, contentY + 86, VanillaUIHelper.TEXT_GRAY, false);
+        VanillaUIHelper.drawSeparator(g, fx, contentY + 96, 206);
+
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_style"), fx, contentY + 107, VanillaUIHelper.TEXT_GRAY, false);
         String preset = profileJson.has("combat_preset")
                 ? profileJson.get("combat_preset").getAsString() : "passive";
         int presetIdx = presetIndex(preset);
-        boolean presetHover = isOver(mouseX, mouseY, fx + 50, contentY + 86, 130, 18);
-        VanillaUIHelper.drawButton(g, fx + 50, contentY + 86, 130, 18, presetHover);
-        g.drawCenteredString(font, tr(PRESET_NAME_KEYS[presetIdx]) + " ▾", fx + 115, contentY + 91,
+        boolean presetHover = isOver(mouseX, mouseY, fx + 52, contentY + 102, 158, 18);
+        VanillaUIHelper.drawButton(g, fx + 52, contentY + 102, 158, 18, presetHover);
+        g.drawCenteredString(font, tr(PRESET_NAME_KEYS[presetIdx]) + " ▾", fx + 131, contentY + 107,
                 presetHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
         if (presetHover) {
             tooltip = tr("wh_npcs.ui.npc.combat_style_tip");
         }
-        drawHeart(g, fx, contentY + 112, 0xFF55FF55);
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_regen"), fx + 11, contentY + 111, VanillaUIHelper.TEXT_GRAY, false);
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_hp_sec"), fx + 94, contentY + 111, VanillaUIHelper.TEXT_WHITE, false);
-
-        boolean beltHover = isOver(mouseX, mouseY, fx, contentY + 130, 160, 18);
-        VanillaUIHelper.drawButton(g, fx, contentY + 130, 160, 18, beltHover);
-        g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_potion_belt"), fx + 80, contentY + 135,
-                beltHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
-        if (beltHover) {
-            tooltip = tr("wh_npcs.ui.npc.potion_belt_tip");
-        }
-
-        int rx = combatRightX();
-        g.fill(rx - 10, contentY + 2, rx - 9, contentY + 136, 0xFF373737);
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_death"), rx, contentY + 5, VanillaUIHelper.TEXT_GRAY, false);
-        String death = profileJson.has("death_behavior")
-                ? profileJson.get("death_behavior").getAsString() : "respawn";
-        boolean respawn = !"vanish".equals(death);
-        boolean deathHover = isOver(mouseX, mouseY, rx + 50, contentY, 110, 18);
-        VanillaUIHelper.drawButton(g, rx + 50, contentY, 110, 18, deathHover);
-        g.drawCenteredString(font, respawn ? tr("wh_npcs.ui.npc.death_respawn") : tr("wh_npcs.ui.npc.death_vanish"),
-                rx + 105, contentY + 5,
-                deathHover ? VanillaUIHelper.TEXT_YELLOW
-                        : (respawn ? VanillaUIHelper.TEXT_GREEN : VanillaUIHelper.TEXT_RED));
-        if (deathHover) {
-            tooltip = tr("wh_npcs.ui.npc.death_tip");
-        }
-        if (respawn) {
-            boolean respHover = isOver(mouseX, mouseY, rx, contentY + 22, 160, 18);
-            VanillaUIHelper.drawButton(g, rx, contentY + 22, 160, 18, respHover);
-            g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_respawn"), rx + 80, contentY + 27,
-                    respHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
-            if (respHover) {
-                tooltip = tr("wh_npcs.ui.npc.respawn_tip");
-            }
-        }
-
-        drawXpOrb(g, rx, contentY + 60, 0xFF7FCB1B);
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_xp"), rx + 12, contentY + 61, VanillaUIHelper.TEXT_GRAY, false);
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_xp_from"), rx + 48, contentY + 61, VanillaUIHelper.TEXT_GRAY, false);
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_xp_to"), rx + 102, contentY + 61, VanillaUIHelper.TEXT_GRAY, false);
 
         String mt = str("mob_type", "undefined");
         int mtIdx = 0;
@@ -1142,89 +1144,161 @@ public class NpcEditorScreen extends ScaledScreen {
                 mtIdx = i;
             }
         }
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_type"), rx, contentY + 95, VanillaUIHelper.TEXT_GRAY, false);
-        boolean mtHover = isOver(mouseX, mouseY, rx + 28, contentY + 90, 132, 18);
-        VanillaUIHelper.drawButton(g, rx + 28, contentY + 90, 132, 18, mtHover);
-        g.drawCenteredString(font, tr(MOBTYPE_NAME_KEYS[mtIdx]) + " ▾", rx + 28 + 66, contentY + 95,
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_type"), fx, contentY + 129, VanillaUIHelper.TEXT_GRAY, false);
+        boolean mtHover = isOver(mouseX, mouseY, fx + 52, contentY + 124, 158, 18);
+        VanillaUIHelper.drawButton(g, fx + 52, contentY + 124, 158, 18, mtHover);
+        g.drawCenteredString(font, tr(MOBTYPE_NAME_KEYS[mtIdx]) + " ▾", fx + 131, contentY + 129,
                 mtHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
         if (mtHover) {
             tooltip = tr("wh_npcs.ui.npc.combat_type_tip");
         }
 
-        boolean leap = profileJson.has("leap_at_target") && profileJson.get("leap_at_target").getAsBoolean();
-        boolean leapHover = isOver(mouseX, mouseY, rx, contentY + 114, 12, 12);
-        VanillaUIHelper.drawButton(g, rx, contentY + 114, 12, 12, leapHover);
-        if (leap) {
-            VanillaUIHelper.drawCheck(g, rx + 1, contentY + 116, VanillaUIHelper.TEXT_GREEN);
+        int chkY = contentY + 148;
+        if (ef) {
+            boolean efMode = "epicfight".equals(str("combat_system", "vanilla"));
+            g.drawString(font, tr("wh_npcs.ui.npc.combat_system"), fx, contentY + 151, VanillaUIHelper.TEXT_GRAY, false);
+            boolean sysHover = isOver(mouseX, mouseY, fx + 52, contentY + 146, 158, 18);
+            VanillaUIHelper.drawButton(g, fx + 52, contentY + 146, 158, 18, sysHover || efMode);
+            g.drawCenteredString(font, tr(efMode ? "wh_npcs.ui.npc.combat_system.ef"
+                            : "wh_npcs.ui.npc.combat_system.vanilla") + " ▾", fx + 131, contentY + 151,
+                    efMode ? VanillaUIHelper.TEXT_YELLOW
+                            : (sysHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA));
+            if (sysHover) {
+                tooltip = tr("wh_npcs.ui.npc.combat_system_tip");
+            }
+            chkY = contentY + 170;
         }
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_leap"), rx + 16, contentY + 116, VanillaUIHelper.TEXT_GRAY, false);
-        if (leapHover || isOver(mouseX, mouseY, rx + 16, contentY + 114, 110, 12)) {
+
+        boolean attackable = profileJson.has("attackable") && profileJson.get("attackable").getAsBoolean();
+        boolean atkHover = isOver(mouseX, mouseY, fx, chkY, 12, 12);
+        VanillaUIHelper.drawButton(g, fx, chkY, 12, 12, atkHover);
+        if (attackable) {
+            VanillaUIHelper.drawCheck(g, fx + 1, chkY + 2, VanillaUIHelper.TEXT_GREEN);
+        }
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_attackable"),
+                fx + 16, chkY + 2, VanillaUIHelper.TEXT_GRAY, false);
+        if (atkHover || isOver(mouseX, mouseY, fx + 16, chkY, 84, 12)) {
+            tooltip = tr("wh_npcs.ui.npc.attackable_tip");
+        }
+        boolean leap = profileJson.has("leap_at_target") && profileJson.get("leap_at_target").getAsBoolean();
+        boolean leapHover = isOver(mouseX, mouseY, fx + 104, chkY, 12, 12);
+        VanillaUIHelper.drawButton(g, fx + 104, chkY, 12, 12, leapHover);
+        if (leap) {
+            VanillaUIHelper.drawCheck(g, fx + 105, chkY + 2, VanillaUIHelper.TEXT_GREEN);
+        }
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_leap"), fx + 120, chkY + 2, VanillaUIHelper.TEXT_GRAY, false);
+        if (leapHover || isOver(mouseX, mouseY, fx + 120, chkY, 90, 12)) {
             tooltip = tr("wh_npcs.ui.npc.combat_leap_tip");
         }
 
-        boolean resHover = isOver(mouseX, mouseY, rx, contentY + 138, 160, 18);
-        VanillaUIHelper.drawButton(g, rx, contentY + 138, 160, 18, resHover);
-        g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_resistances"), rx + 80, contentY + 143,
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_sec_gear"), rx, contentY + 2, VanillaUIHelper.TEXT_GRAY, false);
+        VanillaUIHelper.drawSeparator(g, rx, contentY + 12, 226);
+
+        boolean beltHover = isOver(mouseX, mouseY, rx, contentY + 18, 200, 18);
+        VanillaUIHelper.drawButton(g, rx, contentY + 18, 200, 18, beltHover);
+        g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_potion_belt"), rx + 100, contentY + 23,
+                beltHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
+        if (beltHover) {
+            tooltip = tr("wh_npcs.ui.npc.potion_belt_tip");
+        }
+        boolean natHover = isOver(mouseX, mouseY, rx, contentY + 40, 200, 18);
+        VanillaUIHelper.drawButton(g, rx, contentY + 40, 200, 18, natHover);
+        g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_nature"), rx + 100, contentY + 45,
+                natHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
+        if (natHover) {
+            tooltip = tr("wh_npcs.ui.npc.nature_tip");
+        }
+        boolean resHover = isOver(mouseX, mouseY, rx, contentY + 62, 200, 18);
+        VanillaUIHelper.drawButton(g, rx, contentY + 62, 200, 18, resHover);
+        g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_resistances"), rx + 100, contentY + 67,
                 resHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
         if (resHover) {
             tooltip = tr("wh_npcs.ui.npc.resistances_tip");
         }
 
-        boolean natHover = isOver(mouseX, mouseY, fx, contentY + 152, 160, 18);
-        VanillaUIHelper.drawButton(g, fx, contentY + 152, 160, 18, natHover);
-        g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_nature"), fx + 80, contentY + 157,
-                natHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
-        if (natHover) {
-            tooltip = tr("wh_npcs.ui.npc.nature_tip");
-        }
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_sec_death"), rx, contentY + 86, VanillaUIHelper.TEXT_GRAY, false);
+        VanillaUIHelper.drawSeparator(g, rx, contentY + 96, 226);
 
-        boolean barOn = profileJson.has("bossbar_enabled") && profileJson.get("bossbar_enabled").getAsBoolean();
-        boolean barHover = isOver(mouseX, mouseY, fx, contentY + 174, 12, 12);
-        VanillaUIHelper.drawButton(g, fx, contentY + 174, 12, 12, barHover);
-        if (barOn) {
-            VanillaUIHelper.drawCheck(g, fx + 1, contentY + 176, VanillaUIHelper.TEXT_GREEN);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_outcome"), rx, contentY + 107, VanillaUIHelper.TEXT_GRAY, false);
+        String death = profileJson.has("death_behavior")
+                ? profileJson.get("death_behavior").getAsString() : "respawn";
+        boolean respawn = !"vanish".equals(death);
+        boolean deathHover = isOver(mouseX, mouseY, rx + 52, contentY + 102, 130, 18);
+        VanillaUIHelper.drawButton(g, rx + 52, contentY + 102, 130, 18, deathHover);
+        g.drawCenteredString(font, respawn ? tr("wh_npcs.ui.npc.death_respawn") : tr("wh_npcs.ui.npc.death_vanish"),
+                rx + 117, contentY + 107,
+                deathHover ? VanillaUIHelper.TEXT_YELLOW
+                        : (respawn ? VanillaUIHelper.TEXT_GREEN : VanillaUIHelper.TEXT_RED));
+        if (deathHover) {
+            tooltip = tr("wh_npcs.ui.npc.death_tip");
         }
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_hpbar"), fx + 16, contentY + 176, VanillaUIHelper.TEXT_GRAY, false);
+        if (respawn) {
+            boolean respHover = isOver(mouseX, mouseY, rx, contentY + 124, 200, 18);
+            VanillaUIHelper.drawButton(g, rx, contentY + 124, 200, 18, respHover);
+            g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_respawn"), rx + 100, contentY + 129,
+                    respHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
+            if (respHover) {
+                tooltip = tr("wh_npcs.ui.npc.respawn_tip");
+            }
+        }
+        drawXpOrb(g, rx, contentY + 149, 0xFF7FCB1B);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_xp"), rx + 12, contentY + 150, VanillaUIHelper.TEXT_GRAY, false);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_xp_from"), rx + 48, contentY + 150, VanillaUIHelper.TEXT_GRAY, false);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_xp_to"), rx + 104, contentY + 150, VanillaUIHelper.TEXT_GRAY, false);
+
+        int sy = contentY + 186;
+        g.fill(fx, sy, fx + 450, sy + 1, 0xFF373737);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_sec_display"), fx, sy + 6, VanillaUIHelper.TEXT_GRAY, false);
+
+        int dy = sy + 22;
+        boolean barOn = profileJson.has("bossbar_enabled") && profileJson.get("bossbar_enabled").getAsBoolean();
+        boolean barHover = isOver(mouseX, mouseY, fx, dy, 12, 12);
+        VanillaUIHelper.drawButton(g, fx, dy, 12, 12, barHover);
+        if (barOn) {
+            VanillaUIHelper.drawCheck(g, fx + 1, dy + 2, VanillaUIHelper.TEXT_GREEN);
+        }
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_hpbar"), fx + 16, dy + 2, VanillaUIHelper.TEXT_GRAY, false);
         if (barOn) {
             String col = str("bossbar_color", "red");
-            boolean colH = isOver(mouseX, mouseY, fx + 96, contentY + 172, 70, 18);
-            VanillaUIHelper.drawButton(g, fx + 96, contentY + 172, 70, 18, colH);
-            g.drawCenteredString(font, barColorName(col), fx + 131, contentY + 177,
-                    colH ? VanillaUIHelper.TEXT_YELLOW : barColorRgb(col));
+            boolean colH = isOver(mouseX, mouseY, fx + 92, dy - 2, 16, 16);
+            g.fill(fx + 92, dy - 2, fx + 108, dy + 14, barColorRgb(col));
+            VanillaUIHelper.drawInsetFrame(g, fx + 92, dy - 2, 16, 16);
+            if (colH) {
+                tooltip = tr("wh_npcs.ui.npc.bar_color_tip");
+            }
             int rad = profileJson.has("bossbar_radius") ? profileJson.get("bossbar_radius").getAsInt() : 32;
-            boolean radH = isOver(mouseX, mouseY, fx + 170, contentY + 172, 58, 18);
-            VanillaUIHelper.drawButton(g, fx + 170, contentY + 172, 58, 18, radH);
-            g.drawCenteredString(font, "R: " + rad, fx + 199, contentY + 177,
+            boolean radH = isOver(mouseX, mouseY, fx + 114, dy - 2, 50, 16);
+            VanillaUIHelper.drawButton(g, fx + 114, dy - 2, 50, 16, radH);
+            g.drawCenteredString(font, "R: " + rad, fx + 139, dy + 2,
                     radH ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
         }
-        if (barHover || isOver(mouseX, mouseY, fx + 16, contentY + 174, 78, 12)) {
+        if (barHover || isOver(mouseX, mouseY, fx + 16, dy, 76, 12)) {
             tooltip = tr("wh_npcs.ui.npc.combat_hpbar_tip");
         }
 
-        int ty = contentY + 196;
-        g.fill(fx, ty, fx + 452, ty + 1, 0xFF373737);
-        g.drawString(font, tr("wh_npcs.ui.behavior.totem"), fx, ty + 8, VanillaUIHelper.TEXT_GRAY, false);
         boolean tRender = profileJson.has("totem_render") && profileJson.get("totem_render").getAsBoolean();
-        boolean tHover = isOver(mouseX, mouseY, fx + 134, ty + 4, 12, 12);
-        VanillaUIHelper.drawButton(g, fx + 134, ty + 4, 12, 12, tHover);
+        boolean tHover = isOver(mouseX, mouseY, fx + 230, dy, 12, 12);
+        VanillaUIHelper.drawButton(g, fx + 230, dy, 12, 12, tHover);
         if (tRender) {
-            VanillaUIHelper.drawCheck(g, fx + 135, ty + 6, VanillaUIHelper.TEXT_GREEN);
+            VanillaUIHelper.drawCheck(g, fx + 231, dy + 2, VanillaUIHelper.TEXT_GREEN);
         }
-        g.drawString(font, tr("wh_npcs.ui.behavior.totem_render"), fx + 150, ty + 6, VanillaUIHelper.TEXT_GRAY, false);
-        if (tHover || isOver(mouseX, mouseY, fx, ty + 4, 122, 12)
-                || isOver(mouseX, mouseY, fx + 150, ty + 4, 90, 12)) {
+        g.drawString(font, tr("wh_npcs.ui.behavior.totem_render"), fx + 246, dy + 2, VanillaUIHelper.TEXT_GRAY, false);
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_charges"), fx + 330, dy + 2, VanillaUIHelper.TEXT_GRAY, false);
+        if (tHover || isOver(mouseX, mouseY, fx + 246, dy, 62, 12)) {
             tooltip = tr("wh_npcs.ui.behavior.tip.totem");
         }
 
-        int ay = ty + 32;
-        boolean healHover = isOver(mouseX, mouseY, fx, ay, 84, 18);
-        VanillaUIHelper.drawButton(g, fx, ay, 84, 18, healHover);
-        g.drawCenteredString(font, tr("wh_npcs.ui.combat_preset.heal"), fx + 42, ay + 5,
-                healHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GREEN);
-        boolean clrHover = isOver(mouseX, mouseY, fx + 92, ay, 110, 18);
-        VanillaUIHelper.drawButton(g, fx + 92, ay, 110, 18, clrHover);
-        g.drawCenteredString(font, tr("wh_npcs.ui.combat_preset.clear_effects"), fx + 147, ay + 5,
-                clrHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE);
+        if (npc != null) {
+            int ay = sy + 54;
+            boolean healHover = isOver(mouseX, mouseY, fx, ay, 100, 18);
+            VanillaUIHelper.drawButton(g, fx, ay, 100, 18, healHover);
+            g.drawCenteredString(font, tr("wh_npcs.ui.combat_preset.heal"), fx + 50, ay + 5,
+                    healHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GREEN);
+            boolean clrHover = isOver(mouseX, mouseY, fx + 108, ay, 130, 18);
+            VanillaUIHelper.drawButton(g, fx + 108, ay, 130, 18, clrHover);
+            g.drawCenteredString(font, tr("wh_npcs.ui.combat_preset.clear_effects"), fx + 173, ay + 5,
+                    clrHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE);
+        }
 
         if (tooltip != null && confirmTitle == null) {
             multilineTooltip(g, tooltip, mouseX, mouseY);
@@ -1309,18 +1383,6 @@ public class NpcEditorScreen extends ScaledScreen {
 
     private static final String[] BAR_COLORS = {"pink", "blue", "red", "green", "yellow", "purple", "white"};
 
-    private static String barColorName(String c) {
-        return switch (c) {
-            case "yellow" -> tr("wh_npcs.ui.npc.color_yellow");
-            case "green" -> tr("wh_npcs.ui.npc.color_green");
-            case "blue" -> tr("wh_npcs.ui.npc.color_blue");
-            case "purple" -> tr("wh_npcs.ui.npc.color_purple");
-            case "pink" -> tr("wh_npcs.ui.npc.color_pink");
-            case "white" -> tr("wh_npcs.ui.npc.color_white");
-            default -> tr("wh_npcs.ui.npc.color_red");
-        };
-    }
-
     private static int barColorRgb(String c) {
         return switch (c) {
             case "yellow" -> 0xFFFFE555;
@@ -1335,66 +1397,20 @@ public class NpcEditorScreen extends ScaledScreen {
 
     private boolean handleCombatClick(double mouseX, double mouseY, int button) {
         recalc();
+        if (button != 0) {
+            return false;
+        }
         int fx = contentX + 8;
         int rx = combatRightX();
-        if (button == 0 && isOver(mouseX, mouseY, fx, contentY + 3, 12, 12)) {
-            boolean attackable = profileJson.has("attackable") && profileJson.get("attackable").getAsBoolean();
-            if (attackable) {
-                profileJson.remove("attackable");
-            } else {
-                profileJson.addProperty("attackable", true);
-            }
-            return true;
-        }
-        if (button == 0 && isOver(mouseX, mouseY, fx + 50, contentY + 86, 130, 18)) {
+        boolean ef = com.withouthonor.npcs.compat.Compat.epicFightLoaded();
+
+        if (isOver(mouseX, mouseY, fx + 52, contentY + 102, 158, 18)) {
             if (minecraft != null) {
                 minecraft.setScreen(new CombatPresetScreen(this, profileJson));
             }
             return true;
         }
-        int ty = contentY + 196;
-        if (button == 0 && isOver(mouseX, mouseY, fx + 134, ty + 4, 12, 12)) {
-            if (profileJson.has("totem_render") && profileJson.get("totem_render").getAsBoolean()) {
-                profileJson.remove("totem_render");
-            } else {
-                profileJson.addProperty("totem_render", true);
-            }
-            return true;
-        }
-        int ay = ty + 32;
-        if (button == 0 && npc != null && isOver(mouseX, mouseY, fx, ay, 84, 18)) {
-            com.withouthonor.npcs.network.NetworkHandler.sendToServer(
-                    new com.withouthonor.npcs.network.NpcAdminActionPacket(
-                            npc.getId(), com.withouthonor.npcs.network.NpcAdminActionPacket.HEAL));
-            return true;
-        }
-        if (button == 0 && npc != null && isOver(mouseX, mouseY, fx + 92, ay, 110, 18)) {
-            com.withouthonor.npcs.network.NetworkHandler.sendToServer(
-                    new com.withouthonor.npcs.network.NpcAdminActionPacket(
-                            npc.getId(), com.withouthonor.npcs.network.NpcAdminActionPacket.CLEAR_EFFECTS));
-            return true;
-        }
-        if (button == 0 && isOver(mouseX, mouseY, rx + 50, contentY, 110, 18)) {
-            String death = profileJson.has("death_behavior")
-                    ? profileJson.get("death_behavior").getAsString() : "respawn";
-            profileJson.addProperty("death_behavior", "vanish".equals(death) ? "respawn" : "vanish");
-            return true;
-        }
-        boolean respawn = !"vanish".equals(profileJson.has("death_behavior")
-                ? profileJson.get("death_behavior").getAsString() : "respawn");
-        if (button == 0 && respawn && isOver(mouseX, mouseY, rx, contentY + 22, 160, 18)) {
-            if (minecraft != null) {
-                minecraft.setScreen(new RespawnScreen(this, profileJson));
-            }
-            return true;
-        }
-        if (button == 0 && isOver(mouseX, mouseY, fx, contentY + 130, 160, 18)) {
-            if (minecraft != null) {
-                minecraft.setScreen(new PotionBeltScreen(this, profileJson));
-            }
-            return true;
-        }
-        if (button == 0 && isOver(mouseX, mouseY, rx + 28, contentY + 90, 132, 18)) {
+        if (isOver(mouseX, mouseY, fx + 52, contentY + 124, 158, 18)) {
             String mt = str("mob_type", "undefined");
             int idx = 0;
             for (int i = 0; i < MOBTYPE_IDS.length; i++) {
@@ -1410,19 +1426,27 @@ public class NpcEditorScreen extends ScaledScreen {
             }
             return true;
         }
-        if (button == 0 && isOver(mouseX, mouseY, fx, contentY + 152, 160, 18)) {
-            if (minecraft != null) {
-                minecraft.setScreen(new CreatureNatureScreen(this, profileJson));
+        int chkY = contentY + 148;
+        if (ef) {
+            if (isOver(mouseX, mouseY, fx + 52, contentY + 146, 158, 18)) {
+                if ("epicfight".equals(str("combat_system", "vanilla"))) {
+                    profileJson.remove("combat_system");
+                } else {
+                    profileJson.addProperty("combat_system", "epicfight");
+                }
+                return true;
+            }
+            chkY = contentY + 170;
+        }
+        if (isOver(mouseX, mouseY, fx, chkY, 12, 12)) {
+            if (profileJson.has("attackable") && profileJson.get("attackable").getAsBoolean()) {
+                profileJson.remove("attackable");
+            } else {
+                profileJson.addProperty("attackable", true);
             }
             return true;
         }
-        if (button == 0 && isOver(mouseX, mouseY, rx, contentY + 138, 160, 18)) {
-            if (minecraft != null) {
-                minecraft.setScreen(new ResistancesScreen(this, profileJson));
-            }
-            return true;
-        }
-        if (button == 0 && isOver(mouseX, mouseY, rx, contentY + 114, 12, 12)) {
+        if (isOver(mouseX, mouseY, fx + 104, chkY, 12, 12)) {
             if (profileJson.has("leap_at_target") && profileJson.get("leap_at_target").getAsBoolean()) {
                 profileJson.remove("leap_at_target");
             } else {
@@ -1431,7 +1455,42 @@ public class NpcEditorScreen extends ScaledScreen {
             return true;
         }
 
-        if (button == 0 && isOver(mouseX, mouseY, fx, contentY + 174, 12, 12)) {
+        if (isOver(mouseX, mouseY, rx, contentY + 18, 200, 18)) {
+            if (minecraft != null) {
+                minecraft.setScreen(new PotionBeltScreen(this, profileJson));
+            }
+            return true;
+        }
+        if (isOver(mouseX, mouseY, rx, contentY + 40, 200, 18)) {
+            if (minecraft != null) {
+                minecraft.setScreen(new CreatureNatureScreen(this, profileJson));
+            }
+            return true;
+        }
+        if (isOver(mouseX, mouseY, rx, contentY + 62, 200, 18)) {
+            if (minecraft != null) {
+                minecraft.setScreen(new ResistancesScreen(this, profileJson));
+            }
+            return true;
+        }
+
+        if (isOver(mouseX, mouseY, rx + 52, contentY + 102, 130, 18)) {
+            String death = profileJson.has("death_behavior")
+                    ? profileJson.get("death_behavior").getAsString() : "respawn";
+            profileJson.addProperty("death_behavior", "vanish".equals(death) ? "respawn" : "vanish");
+            return true;
+        }
+        boolean respawn = !"vanish".equals(profileJson.has("death_behavior")
+                ? profileJson.get("death_behavior").getAsString() : "respawn");
+        if (respawn && isOver(mouseX, mouseY, rx, contentY + 124, 200, 18)) {
+            if (minecraft != null) {
+                minecraft.setScreen(new RespawnScreen(this, profileJson));
+            }
+            return true;
+        }
+
+        int dy = contentY + 208;
+        if (isOver(mouseX, mouseY, fx, dy, 12, 12)) {
             if (profileJson.has("bossbar_enabled") && profileJson.get("bossbar_enabled").getAsBoolean()) {
                 profileJson.remove("bossbar_enabled");
             } else {
@@ -1440,11 +1499,11 @@ public class NpcEditorScreen extends ScaledScreen {
             return true;
         }
         boolean barOn = profileJson.has("bossbar_enabled") && profileJson.get("bossbar_enabled").getAsBoolean();
-        if (button == 0 && barOn && isOver(mouseX, mouseY, fx + 96, contentY + 172, 70, 18)) {
+        if (barOn && isOver(mouseX, mouseY, fx + 92, dy - 2, 16, 16)) {
             bossColorPicker = true;
             return true;
         }
-        if (button == 0 && barOn && isOver(mouseX, mouseY, fx + 170, contentY + 172, 58, 18)) {
+        if (barOn && isOver(mouseX, mouseY, fx + 114, dy - 2, 50, 16)) {
             int rad = profileJson.has("bossbar_radius") ? profileJson.get("bossbar_radius").getAsInt() : 32;
             int[] opts = {16, 32, 48, 64};
             int idx = 0;
@@ -1455,6 +1514,29 @@ public class NpcEditorScreen extends ScaledScreen {
             }
             profileJson.addProperty("bossbar_radius", opts[(idx + 1) % opts.length]);
             return true;
+        }
+        if (isOver(mouseX, mouseY, fx + 230, dy, 12, 12)) {
+            if (profileJson.has("totem_render") && profileJson.get("totem_render").getAsBoolean()) {
+                profileJson.remove("totem_render");
+            } else {
+                profileJson.addProperty("totem_render", true);
+            }
+            return true;
+        }
+        if (npc != null) {
+            int ay = contentY + 240;
+            if (isOver(mouseX, mouseY, fx, ay, 100, 18)) {
+                com.withouthonor.npcs.network.NetworkHandler.sendToServer(
+                        new com.withouthonor.npcs.network.NpcAdminActionPacket(
+                                npc.getId(), com.withouthonor.npcs.network.NpcAdminActionPacket.HEAL));
+                return true;
+            }
+            if (isOver(mouseX, mouseY, fx + 108, ay, 130, 18)) {
+                com.withouthonor.npcs.network.NetworkHandler.sendToServer(
+                        new com.withouthonor.npcs.network.NpcAdminActionPacket(
+                                npc.getId(), com.withouthonor.npcs.network.NpcAdminActionPacket.CLEAR_EFFECTS));
+                return true;
+            }
         }
         return false;
     }
@@ -1819,7 +1901,8 @@ public class NpcEditorScreen extends ScaledScreen {
         g.drawString(font, "id: " + shortId, winX + winW - PAD - font.width("id: " + shortId), winY + 8,
                 VanillaUIHelper.TEXT_DARK_GRAY, false);
 
-        int tabX = winX + 4;
+        int tabX = winX + PAD;
+        int tabGap = tabGap();
         for (int i = 0; i < TAB_KEYS.length; i++) {
             String tabLabel = tr(TAB_KEYS[i]);
             int tw = font.width(tabLabel) + 16;
@@ -1827,7 +1910,7 @@ public class NpcEditorScreen extends ScaledScreen {
             VanillaUIHelper.drawTab(g, tabX, winY + HEADER_H, tw, TAB_H, activeTab == i, hovered);
             g.drawString(font, tabLabel, tabX + 8, winY + HEADER_H + 6,
                     activeTab == i ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE, false);
-            tabX += tw + 2;
+            tabX += tw + tabGap;
         }
 
         VanillaUIHelper.drawContentPanel(g, contentX, contentY - 4, contentW, contentH);
@@ -1921,8 +2004,13 @@ public class NpcEditorScreen extends ScaledScreen {
             }
 
             g.drawString(font, tr("wh_npcs.ui.npc.field_lines"), contentX + 8, contentY + 213, VanillaUIHelper.TEXT_GRAY, false);
-            int phraseCount = profileJson.has("ambient_phrases")
-                    ? profileJson.getAsJsonArray("ambient_phrases").size() : 0;
+            int phraseCount = 0;
+            for (String pk : new String[]{"ambient_phrases", "combat_phrases", "interact_phrases",
+                    "death_phrases", "kill_phrases"}) {
+                if (profileJson.has(pk) && profileJson.get(pk).isJsonArray()) {
+                    phraseCount += profileJson.getAsJsonArray(pk).size();
+                }
+            }
             boolean bubblesOff = profileJson.has("bubbles_enabled")
                     && !profileJson.get("bubbles_enabled").getAsBoolean();
             boolean toChat = profileJson.has("bubbles_to_chat")
@@ -2364,18 +2452,27 @@ public class NpcEditorScreen extends ScaledScreen {
             return;
         }
 
+        String pendingTip = null;
+        net.minecraft.world.item.ItemStack pendingStack = net.minecraft.world.item.ItemStack.EMPTY;
+
         g.drawCenteredString(font, tr("wh_npcs.ui.npc.equip_func_col"), funcColX() + 9, contentY + 10, VanillaUIHelper.TEXT_GRAY);
         g.drawCenteredString(font, tr("wh_npcs.ui.npc.equip_cosm_col"), cosmColX() + 9, contentY + 10, VanillaUIHelper.TEXT_AQUA);
         if (isOver(mouseX, mouseY, funcColX(), contentY + 8, 18, 12)) {
-            multilineTooltip(g, tr("wh_npcs.ui.npc.equip_func_tip"), mouseX, mouseY);
+            pendingTip = tr("wh_npcs.ui.npc.equip_func_tip");
         } else if (isOver(mouseX, mouseY, cosmColX(), contentY + 8, 18, 12)) {
-            multilineTooltip(g, tr("wh_npcs.ui.npc.equip_cosm_tip"), mouseX, mouseY);
+            pendingTip = tr("wh_npcs.ui.npc.equip_cosm_tip");
         }
         for (int r = 0; r < 6; r++) {
             int y = equipRowY(r);
             g.drawString(font, tr(EQUIP_LABEL_KEYS[r]), contentX + 4, y + 5, VanillaUIHelper.TEXT_GRAY, false);
-            renderEquipSlot(g, mouseX, mouseY, funcColX(), y, r);
-            renderEquipSlot(g, mouseX, mouseY, cosmColX(), y, r + 6);
+            net.minecraft.world.item.ItemStack f = renderEquipSlot(g, mouseX, mouseY, funcColX(), y, r);
+            net.minecraft.world.item.ItemStack c = renderEquipSlot(g, mouseX, mouseY, cosmColX(), y, r + 6);
+            if (!f.isEmpty()) {
+                pendingStack = f;
+            }
+            if (!c.isEmpty()) {
+                pendingStack = c;
+            }
         }
 
         int arrowY = equipRowY(6);
@@ -2386,10 +2483,10 @@ public class NpcEditorScreen extends ScaledScreen {
             g.renderItem(arrowEquip, funcColX() + 1, arrowY + 1);
             g.renderItemDecorations(font, arrowEquip, funcColX() + 1, arrowY + 1);
             if (arrowHover && carried.isEmpty()) {
-                g.renderTooltip(font, arrowEquip, mouseX, mouseY);
+                pendingStack = arrowEquip;
             }
         } else if (arrowHover && carried.isEmpty()) {
-            multilineTooltip(g, tr("wh_npcs.ui.npc.equip_arrows_tip"), mouseX, mouseY);
+            pendingTip = tr("wh_npcs.ui.npc.equip_arrows_tip");
         }
 
         g.drawString(font, tr("wh_npcs.ui.npc.inventory_take"),
@@ -2407,19 +2504,29 @@ public class NpcEditorScreen extends ScaledScreen {
                     g.renderItem(stack, x + 1, sy + 1);
                     g.renderItemDecorations(font, stack, x + 1, sy + 1);
                     if (hovered && carried.isEmpty()) {
-                        g.renderTooltip(font, stack, mouseX, mouseY);
+                        pendingStack = stack;
                     }
                 }
             }
         }
 
         int ty = invGridY() + 78;
-        drawVisToggle(g, ty, hideArmor, tr("wh_npcs.ui.npc.vis_armor"), mouseX, mouseY,
+        String vt;
+        vt = drawVisToggle(g, ty, hideArmor, tr("wh_npcs.ui.npc.vis_armor"), mouseX, mouseY,
                 tr("wh_npcs.ui.npc.vis_armor_tip"));
-        drawVisToggle(g, ty + 19, hideMainhand, tr("wh_npcs.ui.npc.vis_mainhand"), mouseX, mouseY,
+        if (vt != null) {
+            pendingTip = vt;
+        }
+        vt = drawVisToggle(g, ty + 19, hideMainhand, tr("wh_npcs.ui.npc.vis_mainhand"), mouseX, mouseY,
                 tr("wh_npcs.ui.npc.vis_mainhand_tip"));
-        drawVisToggle(g, ty + 38, hideOffhand, tr("wh_npcs.ui.npc.vis_offhand"), mouseX, mouseY,
+        if (vt != null) {
+            pendingTip = vt;
+        }
+        vt = drawVisToggle(g, ty + 38, hideOffhand, tr("wh_npcs.ui.npc.vis_offhand"), mouseX, mouseY,
                 tr("wh_npcs.ui.npc.vis_offhand_tip"));
+        if (vt != null) {
+            pendingTip = vt;
+        }
         g.drawString(font, tr("wh_npcs.ui.npc.equip_rmb_note"),
                 invGridX(), ty + 60, VanillaUIHelper.TEXT_WHITE, false);
 
@@ -2430,15 +2537,15 @@ public class NpcEditorScreen extends ScaledScreen {
                 !curLoaded ? VanillaUIHelper.TEXT_DARK_GRAY
                         : (curHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA));
         if (curHover) {
-            multilineTooltip(g, curLoaded
+            pendingTip = curLoaded
                     ? tr("wh_npcs.ui.npc.accessories_tip")
-                    : tr("wh_npcs.ui.npc.accessories_tip_missing"), mouseX, mouseY);
+                    : tr("wh_npcs.ui.npc.accessories_tip_missing");
         }
 
         VanillaUIHelper.drawSeparator(g, contentX + 4, dropSlotY() - 20, contentW - 12);
         String dropTip = renderDropGrid(g, mouseX, mouseY);
         if (dropTip != null) {
-            multilineTooltip(g, dropTip, mouseX, mouseY);
+            pendingTip = dropTip;
         }
 
         if (!carried.isEmpty()) {
@@ -2448,9 +2555,15 @@ public class NpcEditorScreen extends ScaledScreen {
             g.renderItemDecorations(font, carried, mouseX - 8, mouseY - 8);
             g.pose().popPose();
         }
+
+        if (!pendingStack.isEmpty()) {
+            g.renderTooltip(font, pendingStack, mouseX, mouseY);
+        } else if (pendingTip != null) {
+            multilineTooltip(g, pendingTip, mouseX, mouseY);
+        }
     }
 
-    private void renderEquipSlot(GuiGraphics g, int mouseX, int mouseY, int x, int y, int idx) {
+    private net.minecraft.world.item.ItemStack renderEquipSlot(GuiGraphics g, int mouseX, int mouseY, int x, int y, int idx) {
         boolean hovered = isOver(mouseX, mouseY, x, y, 18, 18);
         VanillaUIHelper.drawItemSlot(g, x, y, hovered);
         net.minecraft.world.item.ItemStack stack = equipStack(idx);
@@ -2458,9 +2571,10 @@ public class NpcEditorScreen extends ScaledScreen {
             g.renderItem(stack, x + 1, y + 1);
             g.renderItemDecorations(font, stack, x + 1, y + 1);
             if (hovered && carried.isEmpty()) {
-                g.renderTooltip(font, stack, mouseX, mouseY);
+                return stack;
             }
         }
+        return net.minecraft.world.item.ItemStack.EMPTY;
     }
 
     private boolean handleEquipmentClick(double mouseX, double mouseY, int button) {
@@ -3035,9 +3149,13 @@ public class NpcEditorScreen extends ScaledScreen {
         boolean hasSel = selectedDialogue != null && !selectedDialogue.isEmpty();
         boolean expHover = isOver(mouseX, mouseY, dlgExportX(), contentY + 3, 16, 16);
         VanillaUIHelper.drawButton(g, dlgExportX(), contentY + 3, 16, 16, expHover);
-        drawExportIcon(g, dlgExportX() + 4, contentY + 7, hasSel
+        int expColor = hasSel
                 ? (expHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GREEN)
-                : VanillaUIHelper.TEXT_DARK_GRAY);
+                : disabledBtnIcon();
+        if (lightButtons()) {
+            drawExportIcon(g, dlgExportX() + 5, contentY + 8, 0xFF3F3F3F);
+        }
+        drawExportIcon(g, dlgExportX() + 4, contentY + 7, expColor);
         if (expHover) {
             multilineTooltip(g, tr("wh_npcs.ui.npc.dlg_export_tip"), mouseX, mouseY);
         }
@@ -3048,7 +3166,7 @@ public class NpcEditorScreen extends ScaledScreen {
         g.drawCenteredString(font, "✎", dlgRenameX() + 8, contentY + 7,
                 renaming ? VanillaUIHelper.TEXT_YELLOW
                         : (hasSel ? (renHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GREEN)
-                                : VanillaUIHelper.TEXT_DARK_GRAY));
+                                : disabledBtnIcon()));
         if (renHover) {
             multilineTooltip(g, tr("wh_npcs.ui.npc.dlg_rename_tip"), mouseX, mouseY);
         }
@@ -3264,16 +3382,15 @@ public class NpcEditorScreen extends ScaledScreen {
         }
     }
 
-    private void drawVisToggle(GuiGraphics g, int y, boolean hidden, String label,
+    @Nullable
+    private String drawVisToggle(GuiGraphics g, int y, boolean hidden, String label,
                                int mouseX, int mouseY, String tooltip) {
         boolean hover = isOver(mouseX, mouseY, invGridX(), y, 18, 18);
         VanillaUIHelper.drawButton(g, invGridX(), y, 18, 18, hover);
         drawEye(g, invGridX() + 4, y + 6, hidden ? 0xFF707070 : VanillaUIHelper.TEXT_YELLOW, hidden);
         g.drawString(font, label + ": " + (hidden ? tr("wh_npcs.ui.npc.vis_hidden") : tr("wh_npcs.ui.npc.vis_shown")), invGridX() + 24, y + 5,
                 VanillaUIHelper.TEXT_GRAY, false);
-        if (hover) {
-            multilineTooltip(g, tooltip, mouseX, mouseY);
-        }
+        return hover ? tooltip : null;
     }
 
     private static void drawNote(GuiGraphics g, int x, int y, int c) {
@@ -3327,6 +3444,15 @@ public class NpcEditorScreen extends ScaledScreen {
         g.fill(x + 7, y + 2, x + 8, y + 8, c);
     }
 
+    private static int disabledBtnIcon() {
+        return VanillaUIHelper.theme() == VanillaUIHelper.Theme.VANILLA
+                ? 0xFFFFFFFF : VanillaUIHelper.TEXT_DARK_GRAY;
+    }
+
+    private static boolean lightButtons() {
+        return VanillaUIHelper.theme() == VanillaUIHelper.Theme.VANILLA;
+    }
+
     private static void drawExportIcon(GuiGraphics g, int x, int y, int c) {
         g.fill(x + 3, y, x + 5, y + 6, c);
         g.fill(x + 1, y + 2, x + 7, y + 3, c);
@@ -3369,7 +3495,7 @@ public class NpcEditorScreen extends ScaledScreen {
         for (String line : text.split("\n")) {
             lines.add(Component.literal(line));
         }
-        g.renderComponentTooltip(font, lines, x, y);
+        queueTooltip(lines);
     }
 
     private void drawMiniBtn(GuiGraphics g, String label, int x, int y, int w,
@@ -3758,7 +3884,8 @@ public class NpcEditorScreen extends ScaledScreen {
         if (button == 0) {
             recalc();
 
-            int tabX = winX + 4;
+            int tabX = winX + PAD;
+            int tabGap = tabGap();
             for (int i = 0; i < TAB_KEYS.length; i++) {
                 int tw = font.width(tr(TAB_KEYS[i])) + 16;
                 if (isOver(mouseX, mouseY, tabX, winY + HEADER_H, tw, TAB_H)) {
@@ -3770,7 +3897,7 @@ public class NpcEditorScreen extends ScaledScreen {
                     }
                     return true;
                 }
-                tabX += tw + 2;
+                tabX += tw + tabGap;
             }
             if (activeTab == 0) {
                 int fieldX = contentX + 110;

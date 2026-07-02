@@ -232,10 +232,18 @@ public class DialogueScreen extends ScaledScreen {
         MutableComponent part = Component.literal(seg.toString());
         if (ann != null) {
             DialogueNodeData.Annotation a = annotationById(ann);
-            Component hover = a != null
-                    ? Component.literal("§e" + (a.title().isBlank() ? ann : a.title())
-                            + (a.body().isBlank() ? "" : "\n§7" + a.body()))
-                    : Component.translatable("wh_npcs.ui.dialogue.term_not_found", ann);
+            Component hover;
+            if (a != null) {
+                MutableComponent h = Component.empty()
+                        .append(Component.literal(a.title().isBlank() ? ann : a.title())
+                                .withStyle(net.minecraft.ChatFormatting.YELLOW));
+                if (!a.body().isBlank()) {
+                    h.append(Component.literal("\n§r" + a.body()));
+                }
+                hover = h;
+            } else {
+                hover = Component.translatable("wh_npcs.ui.dialogue.term_not_found", ann);
+            }
             part = part.withStyle(s -> s.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, hover)));
         }
         root.append(part);

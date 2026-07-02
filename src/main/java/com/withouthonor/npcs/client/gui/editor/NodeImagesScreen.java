@@ -253,9 +253,12 @@ public class NodeImagesScreen extends ScaledScreen {
         if (by + h + pad * 2 > height) {
             by = height - h - pad * 2;
         }
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 400);
         VanillaUIHelper.drawWindow(g, bx, by, w + pad * 2, h + pad * 2);
         g.blit(e.location(), bx + pad, by + pad, w, h, 0f, 0f,
                 e.width(), e.height(), e.width(), e.height());
+        g.pose().popPose();
     }
 
     private int tabAllX() {
@@ -351,7 +354,7 @@ public class NodeImagesScreen extends ScaledScreen {
             boolean showDel = hovered && canDeleteImages();
             if (showDel) {
                 boolean rh = isOver(mouseX, mouseY, renImgX(), y + 1, 10, 10);
-                drawPencil(g, renImgX(), y + 1, rh ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GRAY);
+                VanillaUIHelper.drawRenameIcon(g, font, renImgX(), y + 2, rh ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GRAY);
                 boolean dh = isOver(mouseX, mouseY, delImgX(), y + 1, 10, 10);
                 g.drawString(font, "✕", delImgX(), y + 2, dh ? 0xFFFF5555 : VanillaUIHelper.TEXT_GRAY, false);
             } else {
@@ -418,12 +421,6 @@ public class NodeImagesScreen extends ScaledScreen {
         renamingFile = null;
     }
 
-    private static void drawPencil(GuiGraphics g, int x, int y, int color) {
-        g.fill(x + 6, y, x + 9, y + 2, color);
-        g.fill(x + 4, y + 2, x + 7, y + 4, color);
-        g.fill(x + 2, y + 4, x + 5, y + 6, color);
-        g.fill(x, y + 6, x + 3, y + 9, color);
-    }
 
     private int heartX() {
         return winX + winW - PAD - 34;

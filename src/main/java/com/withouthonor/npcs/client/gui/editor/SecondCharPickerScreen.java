@@ -1,5 +1,6 @@
 package com.withouthonor.npcs.client.gui.editor;
 
+import com.withouthonor.npcs.client.cache.ClientSkinCache;
 import com.withouthonor.npcs.client.gui.ScaledScreen;
 import com.withouthonor.npcs.client.gui.ScrollDrag;
 import com.withouthonor.npcs.client.gui.SelectableEditBox;
@@ -129,7 +130,8 @@ public class SecondCharPickerScreen extends ScaledScreen {
                         g.fill(winX + PAD + 2, y, winX + winW - PAD - 2, y + ROW_H,
                                 sel ? VanillaUIHelper.BG_SELECTED : VanillaUIHelper.BG_HOVERED);
                     }
-                    g.drawString(font, font.plainSubstrByWidth(e.name(), winW - PAD * 2 - 80), winX + PAD + 6, y + 2,
+                    drawNpcHead(g, e.skin(), winX + PAD + 4, y + 2);
+                    g.drawString(font, font.plainSubstrByWidth(e.name(), winW - PAD * 2 - 92), winX + PAD + 16, y + 2,
                             sel ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE, false);
                     if (!e.author().isEmpty()) {
                         String a = "§8" + e.author();
@@ -248,6 +250,19 @@ public class SecondCharPickerScreen extends ScaledScreen {
     protected boolean mouseReleasedScaled(double mouseX, double mouseY, int button) {
         scrollbars.release();
         return superMouseReleased(mouseX, mouseY, button);
+    }
+
+    private void drawNpcHead(GuiGraphics g, String skin, int x, int y) {
+        ClientSkinCache.Skin sk = (skin == null || skin.isEmpty() || skin.contains("/") || skin.contains("."))
+                ? null : ClientSkinCache.getInstance().get(skin);
+        if (sk != null) {
+            g.blit(sk.location(), x, y, 8, 8, 8.0F, 8.0F, 8, 8, 64, 64);
+            g.blit(sk.location(), x, y, 8, 8, 40.0F, 8.0F, 8, 8, 64, 64);
+        } else {
+            g.fill(x, y, x + 8, y + 8, 0xFF6E5037);
+            g.fill(x + 2, y + 4, x + 3, y + 5, 0xFF2B1F14);
+            g.fill(x + 5, y + 4, x + 6, y + 5, 0xFF2B1F14);
+        }
     }
 
     private void drawBtn(GuiGraphics g, String label, int x, int y, int w, int mouseX, int mouseY) {

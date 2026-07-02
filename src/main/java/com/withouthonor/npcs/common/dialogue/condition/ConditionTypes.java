@@ -25,6 +25,9 @@ public final class ConditionTypes {
         register("score", Conditions.Score::fromJson);
         register("reputation", Conditions.Reputation::fromJson);
         register("var_equals", Conditions.VarEquals::fromJson);
+        register("weather", Conditions.Weather::fromJson);
+        register("time", Conditions.Time::fromJson);
+        register("player_state", Conditions.PlayerState::fromJson);
     }
 
     private ConditionTypes() {
@@ -45,7 +48,11 @@ public final class ConditionTypes {
         if (parser == null) {
             throw new JsonParseException("Unknown condition type: " + type);
         }
-        return parser.apply(json);
+        DialogueCondition condition = parser.apply(json);
+        if (json.has("invert") && json.get("invert").getAsBoolean()) {
+            return new Conditions.Inverted(condition);
+        }
+        return condition;
     }
 
     public static List<DialogueCondition> parseList(JsonArray array) {

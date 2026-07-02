@@ -33,6 +33,8 @@ public class EmotecraftScreen extends ScaledScreen {
 
     private static final int EYE_BTN = 16;
 
+    private static final int REMOVE_W = 84;
+
     private static final int CB_X = 8;
     private static final int CB_Y = 8;
     private static final int CB_W = 210;
@@ -160,6 +162,22 @@ public class EmotecraftScreen extends ScaledScreen {
         return gridX + (gridW - cols * CW) / 2;
     }
 
+    private int doneW() {
+        return pickMode() ? 86 : 60;
+    }
+
+    private int doneX() {
+        return winX + winW - PAD - doneW();
+    }
+
+    private int removeX() {
+        return doneX() - 6 - REMOVE_W;
+    }
+
+    private int nameRightLimit() {
+        return pickMode() ? doneX() : removeX();
+    }
+
     private List<EmotecraftBridge.EmoteRef> displayed() {
         String q = searchBox != null ? searchBox.getValue().toLowerCase(Locale.ROOT).trim() : "";
         ClientPrefs prefs = ClientPrefs.get();
@@ -222,10 +240,14 @@ public class EmotecraftScreen extends ScaledScreen {
         drawBtn(g, "▶ " + Component.translatable("wh_npcs.ui.emotecraft.play").getString(), gridX, bottomY, 120, mouseX, mouseY,
                 can ? VanillaUIHelper.TEXT_GREEN : VanillaUIHelper.TEXT_DARK_GRAY);
         drawBtn(g, "■ " + Component.translatable("wh_npcs.ui.emotecraft.stop").getString(), gridX + 126, bottomY, 70, mouseX, mouseY, VanillaUIHelper.TEXT_WHITE);
-        int doneW = pickMode() ? 86 : 60;
-        int doneX = winX + winW - PAD - doneW;
+        int doneW = doneW();
+        int doneX = doneX();
+        if (!pickMode()) {
+            drawBtn(g, "✕ " + Component.translatable("wh_npcs.ui.emotecraft.remove").getString(), removeX(), bottomY, REMOVE_W, mouseX, mouseY,
+                    can ? 0xFFFF6B6B : VanillaUIHelper.TEXT_DARK_GRAY);
+        }
         int selX = gridX + 204;
-        int selMaxW = Math.max(0, doneX - 6 - selX);
+        int selMaxW = Math.max(0, nameRightLimit() - 6 - selX);
         if (selected != null) {
             String prefix = Component.translatable("wh_npcs.ui.emotecraft.selected_prefix").getString();
             String nm = ellipsize(selected.name(), Math.max(0, selMaxW - font.width(prefix)));
@@ -255,10 +277,8 @@ public class EmotecraftScreen extends ScaledScreen {
             return;
         }
         boolean eyeHover = isOver(mouseX, mouseY, eyeX(), eyeY(), EYE_BTN, EYE_BTN);
-        int doneW = pickMode() ? 86 : 60;
-        int doneX = winX + winW - PAD - doneW;
         int selX = gridX + 204;
-        int selMaxW = Math.max(0, doneX - 6 - selX);
+        int selMaxW = Math.max(0, nameRightLimit() - 6 - selX);
 
         EmotecraftBridge.EmoteRef hov = tileAt(mouseX, mouseY);
         if (eyeHover) {
@@ -433,7 +453,14 @@ public class EmotecraftScreen extends ScaledScreen {
             }
             return true;
         }
-        int doneW = pickMode() ? 86 : 60;
+        if (!pickMode() && selected != null && isOver(mx, my, removeX(), bottomY, REMOVE_W, 18)) {
+            selected = null;
+            if (npc != null) {
+                Compat.emotecraft().stopOn(npc);
+            }
+            return true;
+        }
+        int doneW = doneW();
         if (isOver(mx, my, winX + winW - PAD - doneW, bottomY, doneW, 18)) {
             if (pickMode()) {
                 if (selected != null && onPick != null) {

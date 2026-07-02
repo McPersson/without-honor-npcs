@@ -126,6 +126,16 @@ public final class EmotecraftBridgeImpl implements EmotecraftBridge, EmotecraftC
     }
 
     @Override
+    public boolean isPlaying(CompanionEntity npc) {
+        ModifierLayer<IAnimation> layer = layers.get(npc.getId());
+        try {
+            return layer != null && layer.isActive();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    @Override
     public void stopOn(CompanionEntity npc) {
         ModifierLayer<IAnimation> layer = layers.get(npc.getId());
         if (layer != null) {

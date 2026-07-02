@@ -3,3 +3,25 @@
 # are changed when only line endings change.
 src/generated/**/.cache/cache text eol=lf
 src/generated/**/*.json text eol=lf
+
+# Нормализуем переносы строк во всём репозитории: текст хранится как LF.
+* text=auto eol=lf
+
+# Явно — основные текстовые типы проекта
+*.java       text eol=lf
+*.gradle     text eol=lf
+*.properties text eol=lf
+*.json        text eol=lf
+*.mcmeta     text eol=lf
+*.toml       text eol=lf
+*.md         text eol=lf
+*.txt        text eol=lf
+*.cfg        text eol=lf
+
+# Бинарники — не трогать никогда
+*.jar   binary
+*.png   binary
+*.webp  binary
+*.ogg   binary
+*.wav   binary
+*.zip   binary

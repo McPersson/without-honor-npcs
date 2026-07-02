@@ -20,17 +20,17 @@ public class ModItems {
             DeferredRegister.create(ForgeRegistries.ITEMS, WHCompanions.MODID);
 
     public static final RegistryObject<Item> NPC_SPAWNER =
-            ITEMS.register("npc_spawner", () -> new NpcSpawnerItem(new Item.Properties().rarity(Rarity.EPIC)));
+            ITEMS.register("npc_spawner", () -> new NpcSpawnerItem(new Item.Properties().stacksTo(1).rarity(Rarity.EPIC)));
 
     public static final RegistryObject<Item> MEMORION_FEATHER =
             ITEMS.register("memorion_feather",
-                    () -> new MemorionFeatherItem(new Item.Properties().rarity(Rarity.UNCOMMON)));
+                    () -> new MemorionFeatherItem(new Item.Properties().stacksTo(1).rarity(Rarity.UNCOMMON)));
 
     public static final RegistryObject<Item> NPC_MOVER =
-            ITEMS.register("npc_mover", () -> new NpcMoverItem(new Item.Properties().rarity(Rarity.EPIC)));
+            ITEMS.register("npc_mover", () -> new NpcMoverItem(new Item.Properties().stacksTo(1).rarity(Rarity.EPIC)));
 
     public static final RegistryObject<Item> NPC_BOOK =
-            ITEMS.register("npc_book", () -> new NpcBookItem(new Item.Properties().rarity(Rarity.EPIC)));
+            ITEMS.register("npc_book", () -> new NpcBookItem(new Item.Properties().stacksTo(1).rarity(Rarity.EPIC)));
 
     public static final RegistryObject<Item> NPC_AUTO_SPAWNER =
             ITEMS.register("npc_auto_spawner",

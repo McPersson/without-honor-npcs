@@ -15,6 +15,8 @@ import java.util.List;
 
 public class ScheduleGoal extends Goal {
 
+    private static final double FAR_TELEPORT_SQR = 24.0 * 24.0;
+
     private final CompanionEntity npc;
     private final PathNavigation navigation;
     private int recalcPath;
@@ -67,10 +69,16 @@ public class ScheduleGoal extends Goal {
         double cz = target.getZ() + 0.5;
 
         int reach = "wander".equals(e.pose()) ? Math.max(2, e.radius()) : 2;
-        boolean atPoint = npc.distanceToSqr(cx, target.getY(), cz) <= (double) (reach * reach);
+        double distSq = npc.distanceToSqr(cx, target.getY(), cz);
+        boolean atPoint = distSq <= (double) (reach * reach);
         if (!atPoint) {
             resetPose();
             npc.setScheduleEmote("");
+            if (distSq > FAR_TELEPORT_SQR) {
+                navigation.stop();
+                npc.moveTo(cx, target.getY(), cz, npc.getYRot(), npc.getXRot());
+                return;
+            }
             if (--this.recalcPath <= 0) {
                 this.recalcPath = adjustedTickDelay(10);
                 navigation.moveTo(cx, target.getY(), cz, 1.0D);
@@ -88,76 +96,92 @@ public class ScheduleGoal extends Goal {
                 npc.stopSleeping();
             }
             npc.setSitting(false);
-            applyCustomPose(e);
-            return;
+        } else {
+            switch (e.pose()) {
+                case "wander" -> {
+                    if (npc.isSleeping()) {
+                        npc.stopSleeping();
+                    }
+                    npc.setSitting(false);
+                    if (--this.wanderTimer <= 0) {
+                        this.wanderTimer = 60 + npc.getRandom().nextInt(80);
+                        int r = Math.max(1, e.radius());
+                        double wx = cx + npc.getRandom().nextInt(2 * r + 1) - r;
+                        double wz = cz + npc.getRandom().nextInt(2 * r + 1) - r;
+                        navigation.moveTo(wx, target.getY(), wz, 0.7D);
+                    }
+                }
+                case "sit" -> {
+                    navigation.stop();
+                    if (npc.isSleeping()) {
+                        npc.stopSleeping();
+                    }
+                    npc.setSitting(true);
+                }
+                case "sleep" -> {
+                    navigation.stop();
+                    npc.setSitting(false);
+                    if (!npc.isSleeping()) {
+                        npc.startSleeping(target);
+                    }
+                }
+                default -> {
+                    navigation.stop();
+                    if (npc.isSleeping()) {
+                        npc.stopSleeping();
+                    }
+                    npc.setSitting(false);
+                }
+            }
         }
-        revertCustom();
-        switch (e.pose()) {
-            case "wander" -> {
-                resetPose();
-                if (--this.wanderTimer <= 0) {
-                    this.wanderTimer = 60 + npc.getRandom().nextInt(80);
-                    int r = Math.max(1, e.radius());
-                    double wx = cx + npc.getRandom().nextInt(2 * r + 1) - r;
-                    double wz = cz + npc.getRandom().nextInt(2 * r + 1) - r;
-                    navigation.moveTo(wx, target.getY(), wz, 0.7D);
-                }
-            }
-            case "sit" -> {
-                navigation.stop();
-                if (npc.isSleeping()) {
-                    npc.stopSleeping();
-                }
-                npc.setSitting(true);
-            }
-            case "sleep" -> {
-                navigation.stop();
-                npc.setSitting(false);
-                if (!npc.isSleeping()) {
-                    npc.startSleeping(target);
-                }
-            }
-            default -> {
-                navigation.stop();
-                resetPose();
-            }
-        }
+        applyVisual(e);
+        npc.setScheduleYawFrozen(e.freezeYaw() && !"wander".equals(e.pose()));
     }
 
     private void resetPose() {
-        revertCustom();
-        if (npc.isSleeping()) {
-            npc.stopSleeping();
-        }
-        npc.setSitting(false);
-    }
-
-    private void applyCustomPose(ScheduleEntry e) {
-        if (e.poseSnapshot().equals(appliedSnapshot)) {
-            return;
-        }
-        PoseJson.Pose pose = new PoseJson.Pose();
-        float[] tf = {0F, 0F, 0F, 0F, 0F, 0F, 1F, 1F, 1F};
-        parseSnapshot(e.poseSnapshot(), pose, tf);
-        npc.applyScheduledVisuals(pose, tf);
-        appliedSnapshot = e.poseSnapshot();
-    }
-
-    private void revertCustom() {
         if (!appliedSnapshot.isEmpty()) {
             npc.revertScheduledVisuals();
             appliedSnapshot = "";
         }
+        if (npc.isSleeping()) {
+            npc.stopSleeping();
+        }
+        npc.setSitting(false);
+        npc.setScheduleYawFrozen(false);
     }
 
-    private static void parseSnapshot(String snapshot, PoseJson.Pose poseOut, float[] tf) {
+    private void applyVisual(ScheduleEntry e) {
+        String snap = e.poseSnapshot() == null ? "" : e.poseSnapshot();
+        if (snap.equals(appliedSnapshot)) {
+            return;
+        }
+        if (!appliedSnapshot.isEmpty()) {
+            npc.revertScheduledVisuals();
+        }
+        appliedSnapshot = snap;
+        if (snap.isEmpty()) {
+            return;
+        }
+        PoseJson.Pose pose = new PoseJson.Pose();
+        float[] tf = {0F, 0F, 0F, 0F, 0F, 0F, 1F, 1F, 1F};
+        boolean hasPose = parseSnapshot(snap, pose, tf);
+        if (hasPose) {
+            npc.applyScheduledVisuals(pose, tf);
+        } else {
+            npc.setRenderTransformValues(tf[0], tf[1], tf[2], tf[3], tf[4], tf[5], tf[6], tf[7], tf[8]);
+        }
+    }
+
+    private static boolean parseSnapshot(String snapshot, PoseJson.Pose poseOut, float[] tf) {
         poseOut.clear();
+        boolean hasPose = false;
         try {
             JsonObject o = JsonParser.parseString(snapshot).getAsJsonObject();
             if (o.has("pose")) {
                 JsonObject wrapper = new JsonObject();
                 wrapper.add("pose", o.get("pose"));
                 PoseJson.read(wrapper, poseOut);
+                hasPose = true;
             }
             if (o.has("transform")) {
                 JsonObject t = o.getAsJsonObject("transform");
@@ -174,6 +198,7 @@ public class ScheduleGoal extends Goal {
         } catch (Exception ignored) {
 
         }
+        return hasPose;
     }
 
     private static float tf(JsonObject t, String key, float def) {

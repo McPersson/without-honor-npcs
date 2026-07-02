@@ -304,4 +304,86 @@ public final class PoseLibraryPackets {
             NetworkHandler.sendToPlayer(new ListResult(listEntries(sender.server)), sender);
         }
     }
+
+    public static final class Rename {
+
+        private final String oldName;
+        private final String newName;
+
+        public Rename(String oldName, String newName) {
+            this.oldName = oldName;
+            this.newName = newName;
+        }
+
+        public static void encode(Rename p, FriendlyByteBuf buf) {
+            buf.writeUtf(p.oldName, 80);
+            buf.writeUtf(p.newName, 80);
+        }
+
+        public static Rename decode(FriendlyByteBuf buf) {
+            return new Rename(buf.readUtf(80), buf.readUtf(80));
+        }
+
+        public static void handle(Rename p, Supplier<NetworkEvent.Context> ctx) {
+            ServerPlayer sender = ctx.get().getSender();
+            if (sender != null) {
+                server(p, sender);
+            }
+            ctx.get().setPacketHandled(true);
+        }
+
+        private static void server(Rename p, ServerPlayer sender) {
+            if (!canDelete(sender)) {
+                sender.sendSystemMessage(Component.translatable("wh_npcs.msg.pose.delete_denied")
+                        .withStyle(ChatFormatting.RED));
+                return;
+            }
+            try {
+                String newDisplay = p.newName == null ? "" : p.newName.trim();
+                if (newDisplay.isEmpty()) {
+                    sender.sendSystemMessage(Component.translatable("wh_npcs.msg.pose.rename_err", "empty")
+                            .withStyle(ChatFormatting.RED));
+                    return;
+                }
+                Path dir = posesDir(sender.server);
+                String oldFile = sanitize(p.oldName);
+                String newFile = sanitize(newDisplay);
+                Path oldPath = dir.resolve(oldFile + ".json");
+                Path newPath = dir.resolve(newFile + ".json");
+                if (!Files.exists(oldPath)) {
+                    sender.sendSystemMessage(Component.translatable("wh_npcs.msg.pose.rename_err", "missing")
+                            .withStyle(ChatFormatting.RED));
+                    return;
+                }
+                if (!newFile.equals(oldFile) && Files.exists(newPath)) {
+                    sender.sendSystemMessage(Component.translatable("wh_npcs.msg.pose.rename_exists", newDisplay)
+                            .withStyle(ChatFormatting.RED));
+                    return;
+                }
+                JsonObject json;
+                try (Reader r = Files.newBufferedReader(oldPath, StandardCharsets.UTF_8)) {
+                    json = JsonParser.parseReader(r).getAsJsonObject();
+                }
+                json.addProperty("name", newDisplay);
+                Path tmp = dir.resolve(newFile + ".json.tmp");
+                try (Writer w = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
+                    GSON.toJson(json, w);
+                }
+                try {
+                    Files.move(tmp, newPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                } catch (AtomicMoveNotSupportedException e) {
+                    Files.move(tmp, newPath, StandardCopyOption.REPLACE_EXISTING);
+                }
+                if (!newFile.equals(oldFile)) {
+                    Files.deleteIfExists(oldPath);
+                }
+                sender.sendSystemMessage(Component.translatable("wh_npcs.msg.pose.renamed", newDisplay));
+                NetworkHandler.sendToPlayer(new ListResult(listEntries(sender.server)), sender);
+            } catch (Exception e) {
+                WHCompanions.LOGGER.warn("Pose rename failed for {}: {}", sender.getGameProfile().getName(), e.getMessage());
+                sender.sendSystemMessage(Component.translatable("wh_npcs.msg.pose.rename_err", e.getMessage())
+                        .withStyle(ChatFormatting.RED));
+            }
+        }
+    }
 }

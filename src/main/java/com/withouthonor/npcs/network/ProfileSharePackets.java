@@ -37,17 +37,19 @@ public final class ProfileSharePackets {
     private ProfileSharePackets() {
     }
 
-    public record FileEntry(String name, String author, int sizeKb, long mtime) {
+    public record FileEntry(String name, String author, String skin, int sizeKb, long mtime) {
 
         public static void write(FriendlyByteBuf buf, FileEntry e) {
             buf.writeUtf(e.name(), 80);
             buf.writeUtf(e.author(), 32);
+            buf.writeUtf(e.skin(), 64);
             buf.writeVarInt(e.sizeKb());
             buf.writeVarLong(e.mtime());
         }
 
         public static FileEntry read(FriendlyByteBuf buf) {
-            return new FileEntry(buf.readUtf(80), buf.readUtf(32), buf.readVarInt(), buf.readVarLong());
+            return new FileEntry(buf.readUtf(80), buf.readUtf(32), buf.readUtf(64),
+                    buf.readVarInt(), buf.readVarLong());
         }
     }
 
@@ -121,17 +123,21 @@ public final class ProfileSharePackets {
                 String fn = p.getFileName().toString();
                 String name = fn.substring(0, fn.length() - 5);
                 String author = "";
+                String skin = "";
                 try (Reader r = Files.newBufferedReader(p, StandardCharsets.UTF_8)) {
                     JsonObject json = JsonParser.parseReader(r).getAsJsonObject();
                     if (json.has("exported_by")) {
                         author = json.get("exported_by").getAsString();
+                    }
+                    if (json.has("skin_player_name") && !json.get("skin_player_name").isJsonNull()) {
+                        skin = json.get("skin_player_name").getAsString();
                     }
                 } catch (Exception ignored) {
 
                 }
                 int sizeKb = (int) Math.max(1, Files.size(p) / 1024);
                 long mtime = Files.getLastModifiedTime(p).toMillis();
-                out.add(new FileEntry(name, author, sizeKb, mtime));
+                out.add(new FileEntry(name, author, skin, sizeKb, mtime));
             } catch (IOException ignored) {
 
             }

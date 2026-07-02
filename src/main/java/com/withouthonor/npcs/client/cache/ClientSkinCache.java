@@ -7,34 +7,68 @@ import com.withouthonor.npcs.network.RequestSkinPacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
 
 import javax.annotation.Nullable;
 import java.io.ByteArrayInputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 
+@Mod.EventBusSubscriber(modid = WHCompanions.MODID, value = Dist.CLIENT)
 public class ClientSkinCache {
 
     private static final ClientSkinCache INSTANCE = new ClientSkinCache();
 
     private static final int MAX_BYTES = 262144;
+    private static final int MAX_CONCURRENT_URL = 6;
+    private static final int UPLOADS_PER_TICK = 8;
+    private static final long FAIL_TTL_MS = 5L * 60L * 1000L;
+    private static final Duration REQ_TIMEOUT = Duration.ofSeconds(15);
     private static final String USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-    private static final java.net.http.HttpClient HTTP = java.net.http.HttpClient.newBuilder()
-            .connectTimeout(java.time.Duration.ofSeconds(10))
-            .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+
+    private static final HttpClient HTTP = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
+    private static final ExecutorService IO_EXEC = Executors.newFixedThreadPool(2, r -> {
+        Thread t = new Thread(r, "wh-skin-io");
+        t.setDaemon(true);
+        return t;
+    });
 
     public record Skin(ResourceLocation location, boolean slim) {
     }
 
+    private record Upload(String name, boolean slim, byte[] data) {
+    }
+
     private final Map<String, Skin> skins = new HashMap<>();
     private final Set<String> requested = new HashSet<>();
-    private final Set<String> failed = new HashSet<>();
+    private final Map<String, Long> failed = new HashMap<>();
+
+    private final Semaphore urlPermits = new Semaphore(MAX_CONCURRENT_URL);
+    private final Queue<Runnable> httpQueue = new ConcurrentLinkedQueue<>();
+    private final Queue<Upload> uploadQueue = new ConcurrentLinkedQueue<>();
 
     public static ClientSkinCache getInstance() {
         return INSTANCE;
@@ -47,9 +81,17 @@ public class ClientSkinCache {
         if (skin != null) {
             return skin;
         }
-        if (!failed.contains(name) && requested.add(name)) {
+        Long failAt = failed.get(name);
+        if (failAt != null) {
+            if (System.currentTimeMillis() - failAt < FAIL_TTL_MS) {
+                return null;
+            }
+            failed.remove(name);
+            requested.remove(name);
+        }
+        if (requested.add(name)) {
             if (name.startsWith("http://") || name.startsWith("https://")) {
-                fetchUrlClient(rawName, name);
+                submitUrl(rawName, name);
             } else {
                 NetworkHandler.sendToServer(new RequestSkinPacket(name));
             }
@@ -57,7 +99,8 @@ public class ClientSkinCache {
         return null;
     }
 
-    private void fetchUrlClient(String original, String key) {
+
+    private void submitUrl(String original, String key) {
         String spec = original.trim();
         String lower = spec.toLowerCase(Locale.ROOT);
         boolean slim = lower.endsWith("#slim");
@@ -66,50 +109,97 @@ public class ClientSkinCache {
         }
         final String url = spec;
         final boolean slimFlag = slim;
-        java.net.http.HttpRequest request;
+        IO_EXEC.execute(() -> {
+            byte[] cached = readDiskCache(key);
+            if (cached != null) {
+                uploadQueue.add(new Upload(key, slimFlag, cached));
+                return;
+            }
+            httpQueue.add(() -> startHttp(url, key, slimFlag));
+            pumpHttp();
+        });
+    }
+
+    private void pumpHttp() {
+        while (urlPermits.tryAcquire()) {
+            Runnable task = httpQueue.poll();
+            if (task == null) {
+                urlPermits.release();
+                break;
+            }
+            task.run();
+        }
+    }
+
+    private void startHttp(String url, String key, boolean slim) {
+        HttpRequest request;
         try {
-            request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
+            request = HttpRequest.newBuilder(URI.create(url))
                     .header("User-Agent", USER_AGENT)
                     .header("Accept", "image/png,image/*,*/*;q=0.8")
+                    .timeout(REQ_TIMEOUT)
                     .GET().build();
         } catch (Exception e) {
-            failed.add(key);
+            urlPermits.release();
+            markFailed(key, "bad url: " + e);
+            pumpHttp();
             return;
         }
-        HTTP.sendAsync(request, java.net.http.HttpResponse.BodyHandlers.ofByteArray())
+        HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
                 .whenComplete((resp, err) -> {
+                    urlPermits.release();
+                    pumpHttp();
                     byte[] data = err == null && resp.statusCode() == 200
                             && resp.body().length <= MAX_BYTES ? resp.body() : null;
-                    if (err != null) {
-                        WHCompanions.LOGGER.warn("Client skin url fetch failed '{}': {}", url, err.toString());
-                    } else if (data == null) {
-                        WHCompanions.LOGGER.warn("Client skin url '{}' HTTP {} (size {})",
-                                url, resp.statusCode(), resp.body().length);
+                    if (data == null) {
+                        markFailed(key, err != null ? err.toString()
+                                : ("HTTP " + (resp != null ? resp.statusCode() : "?")));
+                    } else {
+                        IO_EXEC.execute(() -> writeDiskCache(key, data));
+                        uploadQueue.add(new Upload(key, slim, data));
                     }
-                    Minecraft.getInstance().execute(() -> {
-                        if (data == null) {
-                            failed.add(key);
-                        } else {
-                            accept(key, slimFlag, data);
-                        }
-                    });
                 });
     }
 
+    private void markFailed(String key, String reason) {
+        WHCompanions.LOGGER.warn("Client skin '{}' unavailable: {}", key, reason);
+        Minecraft.getInstance().execute(() -> failed.put(key, System.currentTimeMillis()));
+    }
+
+
     public void accept(String rawName, boolean slim, byte[] data) {
-        String name = rawName.toLowerCase(Locale.ROOT);
+        uploadQueue.add(new Upload(rawName.toLowerCase(Locale.ROOT), slim, data));
+    }
+
+    @SubscribeEvent
+    public static void onClientTick(TickEvent.ClientTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) {
+            INSTANCE.drainUploads();
+        }
+    }
+
+    private void drainUploads() {
+        for (int i = 0; i < UPLOADS_PER_TICK; i++) {
+            Upload u = uploadQueue.poll();
+            if (u == null) {
+                break;
+            }
+            doAccept(u.name(), u.slim(), u.data());
+        }
+    }
+
+    private void doAccept(String name, boolean slim, byte[] data) {
         if (data.length == 0) {
-            failed.add(name);
+            failed.put(name, System.currentTimeMillis());
             return;
         }
         try {
             NativeImage image = NativeImage.read(new ByteArrayInputStream(data));
             if (image.getWidth() != 64 || image.getHeight() != 64) {
-
                 WHCompanions.LOGGER.warn("Skin '{}' has unsupported size {}x{}, using default",
                         name, image.getWidth(), image.getHeight());
                 image.close();
-                failed.add(name);
+                failed.put(name, System.currentTimeMillis());
                 return;
             }
 
@@ -126,7 +216,40 @@ public class ClientSkinCache {
             skins.put(name, new Skin(location, slim));
         } catch (Exception e) {
             WHCompanions.LOGGER.error("Failed to load skin '{}'", name, e);
-            failed.add(name);
+            failed.put(name, System.currentTimeMillis());
+        }
+    }
+
+
+    private static Path cacheDir() {
+        return Minecraft.getInstance().gameDirectory.toPath().resolve("wh_npcs").resolve("skincache");
+    }
+
+    private static String cacheFile(String key) {
+        return "u_" + Integer.toHexString(key.hashCode());
+    }
+
+    @Nullable
+    private byte[] readDiskCache(String key) {
+        try {
+            Path png = cacheDir().resolve(cacheFile(key) + ".png");
+            if (!Files.isRegularFile(png)) {
+                return null;
+            }
+            byte[] bytes = Files.readAllBytes(png);
+            return bytes.length > 0 && bytes.length <= MAX_BYTES ? bytes : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void writeDiskCache(String key, byte[] data) {
+        try {
+            Path dir = cacheDir();
+            Files.createDirectories(dir);
+            Files.write(dir.resolve(cacheFile(key) + ".png"), data);
+        } catch (Exception e) {
+            WHCompanions.LOGGER.warn("Failed to cache client skin '{}': {}", key, e.toString());
         }
     }
 

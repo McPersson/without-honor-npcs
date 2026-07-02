@@ -328,7 +328,7 @@ public class FlagsScreen extends ScaledScreen {
                     f.desc().isEmpty() ? VanillaUIHelper.TEXT_DARK_GRAY : VanillaUIHelper.TEXT_GRAY, false);
             if (hovered && canEdit) {
                 boolean rh = isOver(mouseX, mouseY, renX(), y + 2, 10, 10);
-                drawPencil(g, renX(), y + 2, rh ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GRAY);
+                VanillaUIHelper.drawRenameIcon(g, font, renX(), y + 3, rh ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GRAY);
                 boolean dh = isOver(mouseX, mouseY, delX(), y + 2, 10, 10);
                 g.drawString(font, "✕", delX(), y + 3, dh ? 0xFFFF5555 : VanillaUIHelper.TEXT_GRAY, false);
             }
@@ -421,13 +421,6 @@ public class FlagsScreen extends ScaledScreen {
             g.fill(x + 2, y + 4, x + 3, y + 5, 0xFF2B1F14);
             g.fill(x + 5, y + 4, x + 6, y + 5, 0xFF2B1F14);
         }
-    }
-
-    private static void drawPencil(GuiGraphics g, int x, int y, int color) {
-        g.fill(x + 6, y, x + 9, y + 2, color);
-        g.fill(x + 4, y + 2, x + 7, y + 4, color);
-        g.fill(x + 2, y + 4, x + 5, y + 6, color);
-        g.fill(x, y + 6, x + 3, y + 9, color);
     }
 
     @Override

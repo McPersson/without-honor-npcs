@@ -49,6 +49,8 @@ public class PoseLibraryScreen extends ScaledScreen {
     @Nullable
     private String confirmDelete;
     @Nullable
+    private String renamingPose;
+    @Nullable
     private PoseEntry selected;
     private long lastClickMs;
     @Nullable
@@ -261,6 +263,9 @@ public class PoseLibraryScreen extends ScaledScreen {
                 drawBtn(g, Component.translatable(BEHAVIOR_LABEL_KEYS[i]).getString(), behaviorBtnX(i), saveRowY - 1, 56, mouseX, mouseY,
                         VanillaUIHelper.TEXT_AQUA);
             }
+        } else if (renamingPose != null) {
+            drawBtn(g, Component.translatable("wh_npcs.ui.pose_lib.rename").getString(), winX + PAD + 156, saveRowY - 1, listW - 156, mouseX, mouseY,
+                    VanillaUIHelper.TEXT_GOLD);
         } else {
             drawBtn(g, Component.translatable("wh_npcs.ui.pose_lib.save_current").getString(), winX + PAD + 156, saveRowY - 1, listW - 156, mouseX, mouseY,
                     VanillaUIHelper.TEXT_GREEN);
@@ -323,8 +328,9 @@ public class PoseLibraryScreen extends ScaledScreen {
                 nameX += 10;
             }
             boolean showDelete = hovered && canDel && !builtin;
+            boolean showRename = showDelete && !pickMode();
             int rightLimit = heartX(listX) - 8
-                    - (showDelete ? 14 : (builtin ? font.width(Component.translatable("wh_npcs.ui.pose_lib.builtin").getString())
+                    - (showDelete ? (showRename ? 42 : 14) : (builtin ? font.width(Component.translatable("wh_npcs.ui.pose_lib.builtin").getString())
                     : font.width(Component.translatable("wh_npcs.ui.pose_lib.size_kb", f.sizeKb()).getString())));
             int nameColor = builtin ? VanillaUIHelper.TEXT_GOLD
                     : ((hovered || isSel) ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE);
@@ -334,6 +340,15 @@ public class PoseLibraryScreen extends ScaledScreen {
                 g.drawString(font, "§8" + tag, heartX(listX) + 8 - font.width(tag), y + 4,
                         VanillaUIHelper.TEXT_DARK_GRAY, false);
             } else if (showDelete) {
+                if (showRename) {
+                    boolean renHover = isOver(mouseX, mouseY, renX(listX), y + 3, 10, 10);
+                    boolean renaming = f.name().equals(renamingPose);
+                    VanillaUIHelper.drawRenameIcon(g, font, renX(listX), y + 4,
+                            (renHover || renaming) ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GRAY);
+                    if (renHover && confirmDelete == null) {
+                        hoverTooltip = Component.translatable("wh_npcs.ui.pose_lib.rename_tip").getString();
+                    }
+                }
                 boolean delHover = isOver(mouseX, mouseY, delX(listX), y + 3, 10, 10);
                 g.drawString(font, "✕", delX(listX), y + 4,
                         delHover ? 0xFFFF5555 : VanillaUIHelper.TEXT_GRAY, false);
@@ -472,6 +487,10 @@ public class PoseLibraryScreen extends ScaledScreen {
         return listX + listW - 44;
     }
 
+    private int renX(int listX) {
+        return listX + listW - 58;
+    }
+
     private void renderConfirm(GuiGraphics g, int mouseX, int mouseY, String title, String value,
                                String okLabel, int okColor) {
         int w = 260;
@@ -556,6 +575,20 @@ public class PoseLibraryScreen extends ScaledScreen {
             boolean builtin = isBuiltin(f);
             boolean hovered = isOver(mouseX, mouseY, listX + 2, y, listW - 4, ROW_H);
             if (hovered) {
+                if (!builtin && canDel && !pickMode() && isOver(mouseX, mouseY, renX(listX), y + 3, 10, 10)) {
+                    if (f.name().equals(renamingPose)) {
+                        cancelRename();
+                    } else {
+                        renamingPose = f.name();
+                        if (saveNameBox != null) {
+                            saveNameBox.setValue(f.name());
+                            saveNameBox.setTextColor(0xE0E0E0);
+                            setFocused(saveNameBox);
+                            saveNameBox.setFocused(true);
+                        }
+                    }
+                    return true;
+                }
                 if (!builtin && isOver(mouseX, mouseY, heartX(listX), y + 3, 10, 10)) {
                     ClientPrefs.get().toggleFavoritePose(f.name());
                     return true;
@@ -592,7 +625,11 @@ public class PoseLibraryScreen extends ScaledScreen {
                 }
             }
         } else if (isOver(mouseX, mouseY, winX + PAD + 156, saveRowY - 1, listW - 156, 18)) {
-            saveCurrent();
+            if (renamingPose != null) {
+                performRename();
+            } else {
+                saveCurrent();
+            }
             return true;
         }
         if (isOver(mouseX, mouseY, winX + winW - PAD - 60, bottomY, 60, 18)) {
@@ -637,6 +674,10 @@ public class PoseLibraryScreen extends ScaledScreen {
             confirmDelete = null;
             return true;
         }
+        if (key == 256 && renamingPose != null) {
+            cancelRename();
+            return true;
+        }
         return super.keyPressed(key, scancode, mods);
     }
 
@@ -665,6 +706,44 @@ public class PoseLibraryScreen extends ScaledScreen {
         String poseJson = PoseJson.toPoseObject(ps).toString();
         String transformJson = currentTransformObject().toString();
         NetworkHandler.sendToServer(new PoseLibraryPackets.Save(name, poseJson, transformJson));
+    }
+
+    private void cancelRename() {
+        renamingPose = null;
+        if (saveNameBox != null) {
+            saveNameBox.setValue("");
+            saveNameBox.setTextColor(0xE0E0E0);
+        }
+    }
+
+    private void performRename() {
+        if (renamingPose == null || saveNameBox == null) {
+            return;
+        }
+        String oldName = renamingPose;
+        String newName = saveNameBox.getValue().trim();
+        if (newName.isEmpty() || newName.equals(oldName)) {
+            saveNameBox.setTextColor(0xFF5555);
+            return;
+        }
+        for (PoseEntry f : poses) {
+            if (!f.name().equals(oldName) && f.name().equalsIgnoreCase(newName)) {
+                saveNameBox.setTextColor(0xFF5555);
+                return;
+            }
+        }
+        NetworkHandler.sendToServer(new PoseLibraryPackets.Rename(oldName, newName));
+        ClientPrefs.get().renamePose(oldName, newName);
+        for (int i = 0; i < poses.size(); i++) {
+            PoseEntry f = poses.get(i);
+            if (f.name().equals(oldName)) {
+                poses.set(i, new PoseEntry(newName, f.author(), f.mtime(), f.sizeKb(), f.pose(), f.transform()));
+            }
+        }
+        if (selected != null && selected.name().equals(oldName)) {
+            selected = null;
+        }
+        cancelRename();
     }
 
     private void commit(PoseEntry e) {

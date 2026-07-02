@@ -50,6 +50,10 @@ public class WHCompanions {
         if (com.withouthonor.npcs.compat.Compat.carryonLoaded()) {
             com.withouthonor.npcs.compat.carryon.CarryOnCompat.init();
         }
+
+        if (com.withouthonor.npcs.compat.Compat.epicFightLoaded()) {
+            com.withouthonor.npcs.compat.epicfight.EpicFightCompat.init(modEventBus);
+        }
     }
 
     private void onEntityAttributes(EntityAttributeCreationEvent event) {

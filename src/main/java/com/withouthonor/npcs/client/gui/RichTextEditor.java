@@ -38,6 +38,8 @@ public class RichTextEditor extends AbstractWidget {
     private boolean singleLine;
 
     private boolean colorOnly;
+    @Nullable
+    private Component hint;
     private String raw = "";
     private final List<VisChar> chars = new ArrayList<>();
     private final List<Line> lines = new ArrayList<>();
@@ -69,6 +71,10 @@ public class RichTextEditor extends AbstractWidget {
     public RichTextEditor colorOnly() {
         this.colorOnly = true;
         return this;
+    }
+
+    public void setHint(Component hint) {
+        this.hint = hint;
     }
 
     public RichTextEditor withAnnotations() {
@@ -318,6 +324,8 @@ public class RichTextEditor extends AbstractWidget {
         return n;
     }
 
+    private static final String FORMAT_CODES = "0123456789abcdefklmnor";
+
     public void applyFormat(ChatFormatting formatting) {
         String code = "§" + formatting.getChar();
         if (hasSelection()) {
@@ -325,12 +333,82 @@ public class RichTextEditor extends AbstractWidget {
             int max = selMax();
             int rawA = rawPos(min);
             int rawB = rawPos(max);
-            raw = raw.substring(0, rawA) + code + raw.substring(rawA, rawB) + "§r" + raw.substring(rawB);
+            if (formatting == ChatFormatting.RESET) {
+                String inner = stripFormatCodes(raw.substring(rawA, rawB));
+                String after = activeStyleCodes(raw.substring(0, rawB));
+                raw = raw.substring(0, rawA) + "§r" + inner + "§r" + after + raw.substring(rawB);
+            } else {
+                raw = raw.substring(0, rawA) + code + raw.substring(rawA, rawB) + "§r" + raw.substring(rawB);
+            }
             rebuild();
 
         } else {
             replaceRaw(rawPos(cursor), rawPos(cursor), code);
         }
+    }
+
+    private static String stripFormatCodes(String s) {
+        StringBuilder out = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '§' && i + 1 < s.length()
+                    && FORMAT_CODES.indexOf(Character.toLowerCase(s.charAt(i + 1))) >= 0) {
+                i++;
+                continue;
+            }
+            out.append(c);
+        }
+        return out.toString();
+    }
+
+    private static String activeStyleCodes(String prefix) {
+        ChatFormatting color = null;
+        boolean bold = false, italic = false, underline = false, strike = false, obf = false;
+        for (int i = 0; i < prefix.length(); i++) {
+            if (prefix.charAt(i) == '§' && i + 1 < prefix.length()) {
+                ChatFormatting f = ChatFormatting.getByCode(prefix.charAt(i + 1));
+                if (f != null) {
+                    if (f == ChatFormatting.RESET) {
+                        color = null;
+                        bold = italic = underline = strike = obf = false;
+                    } else if (f.isColor()) {
+                        color = f;
+                        bold = italic = underline = strike = obf = false;
+                    } else {
+                        switch (f) {
+                            case BOLD -> bold = true;
+                            case ITALIC -> italic = true;
+                            case UNDERLINE -> underline = true;
+                            case STRIKETHROUGH -> strike = true;
+                            case OBFUSCATED -> obf = true;
+                            default -> {
+                            }
+                        }
+                    }
+                    i++;
+                }
+            }
+        }
+        StringBuilder out = new StringBuilder();
+        if (color != null) {
+            out.append('§').append(color.getChar());
+        }
+        if (bold) {
+            out.append("§l");
+        }
+        if (italic) {
+            out.append("§o");
+        }
+        if (underline) {
+            out.append("§n");
+        }
+        if (strike) {
+            out.append("§m");
+        }
+        if (obf) {
+            out.append("§k");
+        }
+        return out.toString();
     }
 
     @Override
@@ -389,6 +467,10 @@ public class RichTextEditor extends AbstractWidget {
                 }
                 ux += vc.width();
             }
+        }
+
+        if (chars.isEmpty() && hint != null) {
+            g.drawString(font, hint, getX() + PAD, getY() + PAD, 0xFF808080, false);
         }
 
         if (isFocused() && (System.currentTimeMillis() / 500) % 2 == 0) {
@@ -568,6 +650,10 @@ public class RichTextEditor extends AbstractWidget {
             g.renderTooltip(font, Component.translatable(tooltip), mouseX, mouseY);
         }
         g.pose().popPose();
+    }
+
+    public boolean clickToolbar(double mouseX, double mouseY) {
+        return toolbarClicked(mouseX, mouseY);
     }
 
     private boolean toolbarClicked(double mouseX, double mouseY) {
@@ -794,7 +880,7 @@ public class RichTextEditor extends AbstractWidget {
             annScroll -= (int) Math.signum(delta);
             return true;
         }
-        if (mouseX >= getX() && mouseX < getX() + width && mouseY >= getY() && mouseY < getY() + height) {
+        if (!singleLine && mouseX >= getX() && mouseX < getX() + width && mouseY >= getY() && mouseY < getY() + height) {
             scroll -= (int) Math.signum(delta);
             return true;
         }

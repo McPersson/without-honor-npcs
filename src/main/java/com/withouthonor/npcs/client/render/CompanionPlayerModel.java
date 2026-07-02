@@ -18,6 +18,7 @@ public class CompanionPlayerModel extends PlayerModel<CompanionEntity> {
         this.riding = entity.isSitting();
         super.setupAnim(entity, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch);
         applyPose(entity);
+        reapplyAimArms(entity);
 
         com.withouthonor.npcs.compat.EmotecraftClientBridge emote =
                 com.withouthonor.npcs.compat.Compat.emotecraftClient();
@@ -68,6 +69,33 @@ public class CompanionPlayerModel extends PlayerModel<CompanionEntity> {
         }
         entity.setPoseRenderInit(true);
         copyOverlays();
+    }
+
+    private void reapplyAimArms(CompanionEntity entity) {
+        PoseJson.Pose p = entity.getPoseData();
+        if (p.freeze || p.hasAngles()) {
+            return;
+        }
+        net.minecraft.client.model.HumanoidModel.ArmPose pose = this.rightArmPose;
+        boolean aim = true;
+        if (pose == net.minecraft.client.model.HumanoidModel.ArmPose.BOW_AND_ARROW) {
+            this.rightArm.yRot = -0.1F + this.head.yRot;
+            this.leftArm.yRot = 0.1F + this.head.yRot + 0.4F;
+        } else if (pose == net.minecraft.client.model.HumanoidModel.ArmPose.CROSSBOW_HOLD) {
+            this.rightArm.yRot = -0.3F + this.head.yRot;
+            this.leftArm.yRot = 0.6F + this.head.yRot;
+        } else if (pose == net.minecraft.client.model.HumanoidModel.ArmPose.CROSSBOW_CHARGE) {
+            this.rightArm.yRot = -0.8F;
+            float f = net.minecraft.world.item.CrossbowItem.getChargeDuration(entity.getUseItem());
+            float f3 = f <= 0F ? 0F
+                    : net.minecraft.util.Mth.clamp((float) entity.getTicksUsingItem(), 0F, f) / f;
+            this.leftArm.yRot = net.minecraft.util.Mth.lerp(f3, 0.4F, 0.85F);
+        } else {
+            aim = false;
+        }
+        if (aim) {
+            copyOverlays();
+        }
     }
 
     private void applyVisibility(PoseJson.Pose p) {

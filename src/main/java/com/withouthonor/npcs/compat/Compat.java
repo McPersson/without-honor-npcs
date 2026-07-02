@@ -8,6 +8,7 @@ public final class Compat {
     public static final String CURIOS = "curios";
     public static final String CARRYON = "carryon";
     public static final String ETCHED = "etched";
+    public static final String EPICFIGHT = "epicfight";
 
     private static Boolean emotecraftLoaded;
     private static EmotecraftBridge emotecraft;
@@ -16,6 +17,7 @@ public final class Compat {
     private static Boolean carryonLoaded;
     private static Boolean etchedLoaded;
     private static EtchedBridge etched;
+    private static Boolean epicFightLoaded;
 
     private Compat() {
     }
@@ -91,5 +93,12 @@ public final class Compat {
             carryonLoaded = ModList.get() != null && ModList.get().isLoaded(CARRYON);
         }
         return carryonLoaded;
+    }
+
+    public static boolean epicFightLoaded() {
+        if (epicFightLoaded == null) {
+            epicFightLoaded = ModList.get() != null && ModList.get().isLoaded(EPICFIGHT);
+        }
+        return epicFightLoaded;
     }
 }

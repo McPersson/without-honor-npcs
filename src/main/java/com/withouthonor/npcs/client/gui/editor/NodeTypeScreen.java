@@ -96,8 +96,8 @@ public class NodeTypeScreen extends ScaledScreen {
                 for (int i = 0; i < node.getRandomOptions().size(); i++) {
                     DialogueNode.RandomOption opt = node.getRandomOptions().get(i);
                     int y = bodyY() + 42 + i * 22;
-                    EditBox w = add(fx + 36, y, 36, Component.translatable("wh_npcs.ui.node_type.weight").getString(), String.valueOf(opt.weight()), 4, v -> writeBackRandom());
-                    EditBox n = add(fx + 92, y, winW - PAD - 92 - 22, Component.translatable("wh_npcs.ui.node_type.hint_node_id").getString(), opt.next(), 64, v -> writeBackRandom());
+                    EditBox w = add(fx, y, 40, Component.translatable("wh_npcs.ui.node_type.weight").getString(), String.valueOf(opt.weight()), 4, v -> writeBackRandom());
+                    EditBox n = add(fx + 48, y, winW - 2 * PAD - 72, Component.translatable("wh_npcs.ui.node_type.hint_node_id").getString(), opt.next(), 64, v -> writeBackRandom());
                     rWeight.add(w);
                     rNext.add(n);
                 }
@@ -171,6 +171,8 @@ public class NodeTypeScreen extends ScaledScreen {
                         fx, bodyY() + 112, VanillaUIHelper.TEXT_WHITE, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.node_type.input_desc5").getString(),
                         fx, bodyY() + 124, VanillaUIHelper.TEXT_WHITE, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.node_type.input_desc6").getString(),
+                        fx, bodyY() + 136, VanillaUIHelper.TEXT_WHITE, false);
             }
             case "check" -> {
                 boolean condHover = isOver(mouseX, mouseY, fx, bodyY(), 200, 18);
@@ -190,8 +192,8 @@ public class NodeTypeScreen extends ScaledScreen {
                         fx, bodyY(), VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.node_type.random_desc2").getString(),
                         fx, bodyY() + 12, VanillaUIHelper.TEXT_GRAY, false);
-                g.drawString(font, Component.translatable("wh_npcs.ui.node_type.weight").getString(), fx + 36, bodyY() + 30, VanillaUIHelper.TEXT_DARK_GRAY, false);
-                g.drawString(font, Component.translatable("wh_npcs.ui.node_type.hint_node_id").getString(), fx + 92, bodyY() + 30, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.node_type.weight").getString(), fx, bodyY() + 30, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.node_type.hint_node_id").getString(), fx + 48, bodyY() + 30, VanillaUIHelper.TEXT_DARK_GRAY, false);
                 for (int i = 0; i < rWeight.size(); i++) {
                     int y = bodyY() + 42 + i * 22;
                     drawBtn(g, "✕", winX + winW - PAD - 18, y, 18, mouseX, mouseY, VanillaUIHelper.TEXT_RED);

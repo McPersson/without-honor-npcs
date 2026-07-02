@@ -74,6 +74,7 @@ public class CompanionProfile {
     private float moveSpeed = 0.25F;
 
     private String combatPreset = "passive";
+    private String combatSystem = "vanilla";
 
     private boolean guardSpareCreepers;
 
@@ -175,6 +176,7 @@ public class CompanionProfile {
 
     private final java.util.List<ScheduleEntry> schedule = new java.util.ArrayList<>();
     private boolean scheduleEnabled;
+    private boolean scheduleGlobal;
 
     private boolean idleLook = true;
 
@@ -183,6 +185,10 @@ public class CompanionProfile {
     private int idleWanderRadius;
 
     private boolean panicWhenHurt;
+
+    private boolean pursueAttacker = true;
+
+    private boolean holdPosition;
 
     private boolean avoidSun;
 
@@ -428,6 +434,14 @@ public class CompanionProfile {
 
     public void setCombatPreset(String combatPreset) {
         this.combatPreset = combatPreset;
+    }
+
+    public String getCombatSystem() {
+        return combatSystem;
+    }
+
+    public void setCombatSystem(String combatSystem) {
+        this.combatSystem = "epicfight".equals(combatSystem) ? "epicfight" : "vanilla";
     }
 
     public boolean isGuardSpareCreepers() {
@@ -790,6 +804,14 @@ public class CompanionProfile {
         return scheduleEnabled;
     }
 
+    public boolean isScheduleGlobal() {
+        return scheduleGlobal;
+    }
+
+    public void setScheduleGlobal(boolean scheduleGlobal) {
+        this.scheduleGlobal = scheduleGlobal;
+    }
+
     public void setScheduleEnabled(boolean scheduleEnabled) {
         this.scheduleEnabled = scheduleEnabled;
     }
@@ -808,6 +830,14 @@ public class CompanionProfile {
 
     public boolean isPanicWhenHurt() {
         return panicWhenHurt;
+    }
+
+    public boolean isPursueAttacker() {
+        return pursueAttacker;
+    }
+
+    public boolean isHoldPosition() {
+        return holdPosition;
     }
 
     public boolean isAvoidSun() {
@@ -1056,6 +1086,8 @@ public class CompanionProfile {
             default -> style = "passive";
         }
         profile.combatPreset = style;
+        String rawSystem = json.has("combat_system") ? json.get("combat_system").getAsString() : "vanilla";
+        profile.combatSystem = "epicfight".equals(rawSystem) ? "epicfight" : "vanilla";
         profile.aggressorTargets = String.join(",", cats);
         profile.bossbarEnabled = json.has("bossbar_enabled") && json.get("bossbar_enabled").getAsBoolean();
         if (json.has("bossbar_color")) {
@@ -1190,7 +1222,10 @@ public class CompanionProfile {
             }
         }
         profile.scheduleEnabled = json.has("schedule_enabled") && json.get("schedule_enabled").getAsBoolean();
+        profile.scheduleGlobal = json.has("schedule_global") && json.get("schedule_global").getAsBoolean();
         profile.idleLook = !json.has("idle_look") || json.get("idle_look").getAsBoolean();
+        profile.pursueAttacker = !json.has("pursue_attacker") || json.get("pursue_attacker").getAsBoolean();
+        profile.holdPosition = json.has("hold_position") && json.get("hold_position").getAsBoolean();
         profile.idleWander = json.has("idle_wander") && json.get("idle_wander").getAsBoolean();
         if (json.has("idle_wander_radius")) {
             profile.idleWanderRadius = json.get("idle_wander_radius").getAsInt();
@@ -1321,6 +1356,9 @@ public class CompanionProfile {
         if (resMagic != 0) json.addProperty("res_magic", resMagic);
         json.addProperty("move_speed", moveSpeed);
         json.addProperty("combat_preset", combatPreset);
+        if (!"vanilla".equals(combatSystem)) {
+            json.addProperty("combat_system", combatSystem);
+        }
         if (guardSpareCreepers) {
             json.addProperty("guard_spare_creepers", true);
         }
@@ -1390,6 +1428,12 @@ public class CompanionProfile {
         if (!followRun) {
             json.addProperty("follow_run", false);
         }
+        if (!pursueAttacker) {
+            json.addProperty("pursue_attacker", false);
+        }
+        if (holdPosition) {
+            json.addProperty("hold_position", true);
+        }
         if (!followMatchSpeed) {
             json.addProperty("follow_match_speed", false);
         }
@@ -1412,6 +1456,9 @@ public class CompanionProfile {
             JsonArray sched = new JsonArray();
             schedule.forEach(e -> sched.add(e.toJson()));
             json.add("schedule", sched);
+        }
+        if (scheduleGlobal) {
+            json.addProperty("schedule_global", true);
         }
         if (scheduleEnabled) {
             json.addProperty("schedule_enabled", true);

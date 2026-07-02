@@ -217,6 +217,191 @@ public final class Conditions {
         }
     }
 
+    public record Weather(String state) implements DialogueCondition {
+
+        @Override
+        public String type() {
+            return "weather";
+        }
+
+        @Override
+        public boolean test(Context ctx) {
+            net.minecraft.world.level.Level lvl = ctx.player().level();
+            boolean thunder = lvl.isThundering();
+            boolean rain = lvl.isRaining();
+            return switch (state) {
+                case "thunder" -> thunder;
+                case "rain" -> rain && !thunder;
+                default -> !rain;
+            };
+        }
+
+        public static Weather fromJson(JsonObject json) {
+            return new Weather(json.has("state") ? json.get("state").getAsString() : "clear");
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("type", type());
+            json.addProperty("state", state);
+            return json;
+        }
+    }
+
+    public record Time(int minTicks, int maxTicks) implements DialogueCondition {
+
+        @Override
+        public String type() {
+            return "time";
+        }
+
+        @Override
+        public boolean test(Context ctx) {
+            long dt = ((ctx.player().level().getDayTime() % 24000L) + 24000L) % 24000L;
+            int t = (int) dt;
+            if (minTicks <= maxTicks) {
+                return t >= minTicks && t <= maxTicks;
+            }
+            return t >= minTicks || t <= maxTicks;
+        }
+
+        public static Time fromJson(JsonObject json) {
+            return new Time(json.has("min") ? json.get("min").getAsInt() : 0,
+                    json.has("max") ? json.get("max").getAsInt() : 24000);
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("type", type());
+            json.addProperty("min", minTicks);
+            json.addProperty("max", maxTicks);
+            return json;
+        }
+    }
+
+    public record PlayerState(Integer hpMin, Integer hpMax, Integer foodMin, Integer foodMax,
+                              java.util.List<ResourceLocation> effects, String effectMode)
+            implements DialogueCondition {
+
+        @Override
+        public String type() {
+            return "player_state";
+        }
+
+        @Override
+        public boolean test(Context ctx) {
+            net.minecraft.server.level.ServerPlayer p = ctx.player();
+            float hp = p.getHealth();
+            if (hpMin != null && hp < hpMin) {
+                return false;
+            }
+            if (hpMax != null && hp > hpMax) {
+                return false;
+            }
+            int food = p.getFoodData().getFoodLevel();
+            if (foodMin != null && food < foodMin) {
+                return false;
+            }
+            if (foodMax != null && food > foodMax) {
+                return false;
+            }
+            switch (effectMode) {
+                case "any" -> {
+                    for (ResourceLocation rl : effects) {
+                        net.minecraft.world.effect.MobEffect e = ForgeRegistries.MOB_EFFECTS.getValue(rl);
+                        if (e != null && p.hasEffect(e)) {
+                            return true;
+                        }
+                    }
+                    return effects.isEmpty();
+                }
+                case "all" -> {
+                    for (ResourceLocation rl : effects) {
+                        net.minecraft.world.effect.MobEffect e = ForgeRegistries.MOB_EFFECTS.getValue(rl);
+                        if (e == null || !p.hasEffect(e)) {
+                            return false;
+                        }
+                    }
+                }
+                case "any_effect" -> {
+                    return !p.getActiveEffects().isEmpty();
+                }
+                case "no_effect" -> {
+                    return p.getActiveEffects().isEmpty();
+                }
+                default -> {
+                }
+            }
+            return true;
+        }
+
+        public static PlayerState fromJson(JsonObject json) {
+            java.util.List<ResourceLocation> effects = new java.util.ArrayList<>();
+            if (json.has("effects")) {
+                json.getAsJsonArray("effects").forEach(e -> {
+                    ResourceLocation rl = ResourceLocation.tryParse(e.getAsString());
+                    if (rl != null) {
+                        effects.add(rl);
+                    }
+                });
+            }
+            return new PlayerState(
+                    json.has("hp_min") ? json.get("hp_min").getAsInt() : null,
+                    json.has("hp_max") ? json.get("hp_max").getAsInt() : null,
+                    json.has("food_min") ? json.get("food_min").getAsInt() : null,
+                    json.has("food_max") ? json.get("food_max").getAsInt() : null,
+                    effects,
+                    json.has("effect_mode") ? json.get("effect_mode").getAsString() : "off");
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("type", type());
+            if (hpMin != null) {
+                json.addProperty("hp_min", hpMin);
+            }
+            if (hpMax != null) {
+                json.addProperty("hp_max", hpMax);
+            }
+            if (foodMin != null) {
+                json.addProperty("food_min", foodMin);
+            }
+            if (foodMax != null) {
+                json.addProperty("food_max", foodMax);
+            }
+            if (!"off".equals(effectMode)) {
+                json.addProperty("effect_mode", effectMode);
+                JsonArray arr = new JsonArray();
+                effects.forEach(rl -> arr.add(rl.toString()));
+                json.add("effects", arr);
+            }
+            return json;
+        }
+    }
+
+    public record Inverted(DialogueCondition inner) implements DialogueCondition {
+
+        @Override
+        public String type() {
+            return inner.type();
+        }
+
+        @Override
+        public boolean test(Context ctx) {
+            return !inner.test(ctx);
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = inner.toJson();
+            json.addProperty("invert", true);
+            return json;
+        }
+    }
+
     public record Score(String objective, Integer min, Integer max) implements DialogueCondition {
 
         @Override

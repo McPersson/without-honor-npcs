@@ -40,4 +40,13 @@ public final class DialogueSessions {
             }
         }
     }
+
+    public static void renameNode(String dialogueId, String oldNode, String newNode) {
+        for (Map.Entry<UUID, Session> e : SESSIONS.entrySet()) {
+            Session s = e.getValue();
+            if (s.dialogueId().equals(dialogueId) && s.nodeId().equals(oldNode)) {
+                e.setValue(new Session(s.npcUuid(), dialogueId, newNode));
+            }
+        }
+    }
 }

@@ -51,7 +51,13 @@ public class ConditionsEditorScreen extends ScaledScreen {
             new TypeInfo("player", "wh_npcs.ui.cond.type.player.label",
                     "wh_npcs.ui.cond.type.player.desc", "wh_npcs.ui.cond.type.player.detail"),
             new TypeInfo("var_equals", "wh_npcs.ui.cond.type.var_equals.label",
-                    "wh_npcs.ui.cond.type.var_equals.desc", "wh_npcs.ui.cond.type.var_equals.detail"));
+                    "wh_npcs.ui.cond.type.var_equals.desc", "wh_npcs.ui.cond.type.var_equals.detail"),
+            new TypeInfo("weather", "wh_npcs.ui.cond.type.weather.label",
+                    "wh_npcs.ui.cond.type.weather.desc", "wh_npcs.ui.cond.type.weather.detail"),
+            new TypeInfo("time", "wh_npcs.ui.cond.type.time.label",
+                    "wh_npcs.ui.cond.type.time.desc", "wh_npcs.ui.cond.type.time.detail"),
+            new TypeInfo("player_state", "wh_npcs.ui.cond.type.player_state.label",
+                    "wh_npcs.ui.cond.type.player_state.desc", "wh_npcs.ui.cond.type.player_state.detail"));
 
     private final Screen parent;
 
@@ -80,6 +86,19 @@ public class ConditionsEditorScreen extends ScaledScreen {
     private EditBox maxBox;
 
     private EditBox factionBox;
+
+    private EditBox timeMinBox;
+    private EditBox timeMaxBox;
+    private EditBox hpMinBox;
+    private EditBox hpMaxBox;
+    private EditBox foodMinBox;
+    private EditBox foodMaxBox;
+    private String weatherState = "clear";
+    private String effectMode = "off";
+    @Nullable
+    private String editorTooltip;
+    private final java.util.List<ResourceLocation> draftEffects = new java.util.ArrayList<>();
+    private boolean invertDraft;
 
     private final ResourceLocation[] slotItem = new ResourceLocation[ItemsCondition.MAX_SLOTS];
     private final CompoundTag[] slotNbt = new CompoundTag[ItemsCondition.MAX_SLOTS];
@@ -179,7 +198,7 @@ public class ConditionsEditorScreen extends ScaledScreen {
                     value.isBlank() ? null : EditorCodes.fromEditor(value)));
         }
 
-        DialogueCondition condition = current();
+        DialogueCondition condition = unwrap(current());
         if (condition == null) {
             return;
         }
@@ -290,8 +309,71 @@ public class ConditionsEditorScreen extends ScaledScreen {
                     tagBoxes[i].setResponder(v -> writeBack());
                 }
             }
+            case "time" -> {
+                Conditions.Time t = (Conditions.Time) condition;
+                timeMinBox = timeField(rightX + 24, mainY + 14, t.minTicks());
+                timeMaxBox = timeField(rightX + 104, mainY + 14, t.maxTicks());
+            }
+            case "player_state" -> {
+                Conditions.PlayerState ps = (Conditions.PlayerState) condition;
+                hpMinBox = numField(rightX + 34, mainY + 14, ps.hpMin());
+                hpMaxBox = numField(rightX + 92, mainY + 14, ps.hpMax());
+                foodMinBox = numField(rightX + 54, mainY + 42, ps.foodMin());
+                foodMaxBox = numField(rightX + 112, mainY + 42, ps.foodMax());
+            }
             default -> {
             }
+        }
+    }
+
+    private static DialogueCondition unwrap(DialogueCondition c) {
+        return c instanceof Conditions.Inverted inv ? inv.inner() : c;
+    }
+
+    private EditBox numField(int x, int y, Integer value) {
+        EditBox b = addRenderableWidget(new SelectableEditBox(font, x, y, 40, 16, Component.empty()));
+        b.setMaxLength(5);
+        b.setValue(value != null ? String.valueOf(value) : "");
+        b.setResponder(v -> writeBack());
+        return b;
+    }
+
+    private EditBox timeField(int x, int y, int ticks) {
+        EditBox b = addRenderableWidget(new SelectableEditBox(font, x, y, 48, 16, Component.empty()));
+        b.setMaxLength(5);
+        b.setValue(ticksToHhmm(ticks));
+        b.setResponder(v -> writeBack());
+        return b;
+    }
+
+    private static String ticksToHhmm(int ticks) {
+        int t = ((ticks % 24000) + 24000) % 24000;
+        int hour = (t / 1000 + 6) % 24;
+        int minute = (t % 1000) * 60 / 1000;
+        return String.format("%02d:%02d", hour, minute);
+    }
+
+    private static int hhmmToTicks(String s, int def) {
+        try {
+            String v = s.trim();
+            int c = v.indexOf(':');
+            int h = c < 0 ? Integer.parseInt(v.trim()) : Integer.parseInt(v.substring(0, c).trim());
+            int m = c < 0 ? 0 : Integer.parseInt(v.substring(c + 1).trim());
+            int t = ((h - 6 + 24) % 24) * 1000 + m * 1000 / 60;
+            return ((t % 24000) + 24000) % 24000;
+        } catch (NumberFormatException e) {
+            return def;
+        }
+    }
+
+    private static Integer parseOpt(EditBox box) {
+        if (box == null || box.getValue().trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(box.getValue().trim());
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
@@ -323,7 +405,8 @@ public class ConditionsEditorScreen extends ScaledScreen {
     }
 
     private void loadDraft() {
-        DialogueCondition condition = current();
+        invertDraft = current() instanceof Conditions.Inverted;
+        DialogueCondition condition = unwrap(current());
         carried = ItemStack.EMPTY;
         for (int i = 0; i < ItemsCondition.MAX_SLOTS; i++) {
             slotItem[i] = null;
@@ -352,6 +435,12 @@ public class ConditionsEditorScreen extends ScaledScreen {
             flagValue = flag.value();
         } else if (condition instanceof Conditions.VarEquals ve) {
             varIgnoreCase = ve.ignoreCase();
+        } else if (condition instanceof Conditions.Weather w) {
+            weatherState = w.state();
+        } else if (condition instanceof Conditions.PlayerState ps) {
+            effectMode = ps.effectMode();
+            draftEffects.clear();
+            draftEffects.addAll(ps.effects());
         }
     }
 
@@ -362,9 +451,9 @@ public class ConditionsEditorScreen extends ScaledScreen {
         }
         try {
             switch (condition.type()) {
-                case "flag" -> conditions.set(selected, new Conditions.Flag(
+                case "flag" -> store(new Conditions.Flag(
                         flagBox.getValue().isBlank() ? "flag" : flagBox.getValue().trim(), flagValue));
-                case "var_equals" -> conditions.set(selected, new Conditions.VarEquals(
+                case "var_equals" -> store(new Conditions.VarEquals(
                         varNameBox.getValue().isBlank() ? "var" : varNameBox.getValue().trim(),
                         varValueBox.getValue().trim(), varIgnoreCase));
                 case "player" -> {
@@ -375,23 +464,23 @@ public class ConditionsEditorScreen extends ScaledScreen {
                         }
                     }
                     if (!names.isEmpty()) {
-                        conditions.set(selected, new Conditions.PlayerName(names));
+                        store(new Conditions.PlayerName(names));
                     }
                 }
-                case "permission" -> conditions.set(selected, new Conditions.Permission(parseInt(numberBox, 2)));
-                case "random" -> conditions.set(selected, new Conditions.Random(
+                case "permission" -> store(new Conditions.Permission(parseInt(numberBox, 2)));
+                case "random" -> store(new Conditions.Random(
                         Math.max(1, Math.min(100, parseInt(numberBox, 50)))));
-                case "score" -> conditions.set(selected, new Conditions.Score(
+                case "score" -> store(new Conditions.Score(
                         objectiveBox.getValue().trim(),
                         minBox.getValue().isBlank() ? null : parseInt(minBox, 0),
                         maxBox.getValue().isBlank() ? null : parseInt(maxBox, 0)));
-                case "reputation" -> conditions.set(selected, new Conditions.Reputation(
+                case "reputation" -> store(new Conditions.Reputation(
                         factionBox.getValue().trim(),
                         minBox.getValue().isBlank() ? null : parseInt(minBox, 0),
                         maxBox.getValue().isBlank() ? null : parseInt(maxBox, 0)));
                 case "held_item" -> {
                     if (heldItemId != null) {
-                        conditions.set(selected, new Conditions.HeldItem(heldItemId));
+                        store(new Conditions.HeldItem(heldItemId));
                     }
                 }
                 case "items" -> {
@@ -409,15 +498,25 @@ public class ConditionsEditorScreen extends ScaledScreen {
                         }
                     }
                     if (!slots.isEmpty()) {
-                        conditions.set(selected, new ItemsCondition(slots, draftAll, draftConsume));
+                        store(new ItemsCondition(slots, draftAll, draftConsume));
                     }
                 }
+                case "weather" -> store(new Conditions.Weather(weatherState));
+                case "time" -> store(new Conditions.Time(
+                        hhmmToTicks(timeMinBox.getValue(), 0), hhmmToTicks(timeMaxBox.getValue(), 24000)));
+                case "player_state" -> store(new Conditions.PlayerState(
+                        parseOpt(hpMinBox), parseOpt(hpMaxBox), parseOpt(foodMinBox), parseOpt(foodMaxBox),
+                        new ArrayList<>(draftEffects), effectMode));
                 default -> {
                 }
             }
         } catch (Exception ignored) {
 
         }
+    }
+
+    private void store(DialogueCondition base) {
+        conditions.set(selected, invertDraft ? new Conditions.Inverted(base) : base);
     }
 
     private static int parseInt(EditBox box, int def) {
@@ -443,6 +542,11 @@ public class ConditionsEditorScreen extends ScaledScreen {
                     com.withouthonor.npcs.client.ClientFactions.all().isEmpty() ? "example"
                             : com.withouthonor.npcs.client.ClientFactions.all().get(0).id(),
                     20, null);
+            case "weather" -> new Conditions.Weather("rain");
+            case "time" -> new Conditions.Time(0, 12000);
+            case "player_state" -> new Conditions.PlayerState(null, null, null, null,
+                    new ArrayList<>(), "off");
+            case "score" -> new Conditions.Score("objective", null, null);
             default -> new Conditions.Score("objective", null, null);
         };
         conditions.add(created);
@@ -454,6 +558,13 @@ public class ConditionsEditorScreen extends ScaledScreen {
     @Override
     protected void renderContent(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         recalc();
+        editorTooltip = null;
+        if (hintBox != null) {
+            hintBox.visible = !typePicker;
+        }
+        if (factionBox != null) {
+            factionBox.visible = !typePicker;
+        }
         VanillaUIHelper.drawWindow(g, winX, winY, winW, winH);
 
         g.fill(winX + 2, winY + 2, winX + winW - 2, winY + HEADER_H - 2, VanillaUIHelper.BG_HEADER);
@@ -491,6 +602,9 @@ public class ConditionsEditorScreen extends ScaledScreen {
             g.renderItemDecorations(font, carried, mouseX - 8, mouseY - 8);
             g.pose().popPose();
         }
+        if (editorTooltip != null && !typePicker && carried.isEmpty()) {
+            multilineTooltip(g, editorTooltip, mouseX, mouseY);
+        }
     }
 
     private void renderConditionList(GuiGraphics g, int mouseX, int mouseY) {
@@ -503,8 +617,17 @@ public class ConditionsEditorScreen extends ScaledScreen {
                 g.fill(leftX + 2, y, leftX + LEFT_W - 2, y + ROW_H,
                         isSelected ? VanillaUIHelper.BG_SELECTED : VanillaUIHelper.BG_HOVERED);
             }
-            g.drawString(font, font.plainSubstrByWidth(summary(conditions.get(i)), LEFT_W - 22),
+            boolean inverted = conditions.get(i) instanceof Conditions.Inverted;
+            g.drawString(font, font.plainSubstrByWidth(summary(conditions.get(i)), LEFT_W - 34),
                     leftX + 4, y + 2, isSelected ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE, false);
+            if (hovered || inverted) {
+                boolean invHover = isOver(mouseX, mouseY, leftX + LEFT_W - 30, y, 12, ROW_H);
+                g.drawString(font, "¬", leftX + LEFT_W - 28, y + 2,
+                        inverted ? VanillaUIHelper.TEXT_GOLD : (invHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_DARK_GRAY), false);
+                if (invHover) {
+                    editorTooltip = Component.translatable("wh_npcs.ui.conditions.invert_tip").getString();
+                }
+            }
             if (hovered) {
                 g.drawString(font, "×", leftX + LEFT_W - 12, y + 2, VanillaUIHelper.TEXT_RED, false);
             }
@@ -516,6 +639,9 @@ public class ConditionsEditorScreen extends ScaledScreen {
     }
 
     public static String summary(DialogueCondition condition) {
+        if (condition instanceof Conditions.Inverted inv) {
+            return "§c¬ §r" + summary(inv.inner());
+        }
         if (condition instanceof ItemsCondition items) {
             return Component.translatable("wh_npcs.ui.conditions.sum_items", items.getSlots().size()).getString()
                     + (items.isConsume()
@@ -550,6 +676,17 @@ public class ConditionsEditorScreen extends ScaledScreen {
         if (condition instanceof Conditions.Reputation reputation) {
             return Component.translatable("wh_npcs.ui.conditions.sum_reputation",
                     reputation.faction()).getString();
+        }
+        if (condition instanceof Conditions.Weather w) {
+            return Component.translatable("wh_npcs.ui.conditions.sum_weather",
+                    Component.translatable("wh_npcs.ui.conditions.weather_" + w.state()).getString()).getString();
+        }
+        if (condition instanceof Conditions.Time t) {
+            return Component.translatable("wh_npcs.ui.conditions.sum_time",
+                    ticksToHhmm(t.minTicks()), ticksToHhmm(t.maxTicks())).getString();
+        }
+        if (condition instanceof Conditions.PlayerState) {
+            return Component.translatable("wh_npcs.ui.conditions.sum_player_state").getString();
         }
         return condition.type();
     }
@@ -625,6 +762,55 @@ public class ConditionsEditorScreen extends ScaledScreen {
                 renderInventoryGrid(g, mouseX, mouseY, heldGridY() + 2);
             }
             case "items" -> renderItemsEditor(g, mouseX, mouseY);
+            case "weather" -> {
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.weather_label").getString(),
+                        rightX, mainY + 4, VanillaUIHelper.TEXT_GRAY, false);
+                String[] st = {"clear", "rain", "thunder"};
+                for (int i = 0; i < 3; i++) {
+                    drawSmall(g, Component.translatable("wh_npcs.ui.conditions.weather_" + st[i]).getString(),
+                            rightX + i * 84, mainY + 20, 80, mouseX, mouseY,
+                            weatherState.equals(st[i]) ? VanillaUIHelper.TEXT_GOLD : VanillaUIHelper.TEXT_AQUA);
+                }
+            }
+            case "time" -> {
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.time_from").getString(),
+                        rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.time_to").getString(),
+                        rightX + 80, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.time_hint").getString(),
+                        rightX, mainY + 44, VanillaUIHelper.TEXT_WHITE, false);
+                if (timeMinBox != null && isOver(mouseX, mouseY, timeMinBox.getX(), timeMinBox.getY(),
+                        timeMinBox.getWidth(), timeMinBox.getHeight())) {
+                    int t = hhmmToTicks(timeMinBox.getValue(), 0);
+                    editorTooltip = Component.translatable("wh_npcs.ui.schedule.tip.time", ticksToHhmm(t), t).getString();
+                }
+                if (timeMaxBox != null && isOver(mouseX, mouseY, timeMaxBox.getX(), timeMaxBox.getY(),
+                        timeMaxBox.getWidth(), timeMaxBox.getHeight())) {
+                    int t = hhmmToTicks(timeMaxBox.getValue(), 24000);
+                    editorTooltip = Component.translatable("wh_npcs.ui.schedule.tip.time", ticksToHhmm(t), t).getString();
+                }
+            }
+            case "player_state" -> {
+                g.drawString(font, "§7HP:", rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, "–", rightX + 78, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.food_label").getString(),
+                        rightX, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, "–", rightX + 98, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
+                if (isOver(mouseX, mouseY, rightX, mainY + 16, 30, 12)) {
+                    editorTooltip = Component.translatable("wh_npcs.ui.conditions.hp_tip").getString();
+                }
+                if (isOver(mouseX, mouseY, rightX, mainY + 44, 48, 12)) {
+                    editorTooltip = Component.translatable("wh_npcs.ui.conditions.food_tip").getString();
+                }
+                drawSmall(g, Component.translatable("wh_npcs.ui.conditions.effmode_" + effectMode).getString(),
+                        rightX, mainY + 70, 180, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                if (effectMode.equals("any") || effectMode.equals("all")) {
+                    drawSmall(g, Component.translatable("wh_npcs.ui.conditions.effects_btn", draftEffects.size()).getString(),
+                            rightX + 186, mainY + 70, 120, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                }
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.empty_bound").getString(),
+                        rightX, mainY + 96, VanillaUIHelper.TEXT_DARK_GRAY, false);
+            }
             default -> g.drawString(font,
                     Component.translatable("wh_npcs.ui.conditions.type_later", condition.type()).getString(),
                     rightX, mainY + 18, VanillaUIHelper.TEXT_STATUS, false);
@@ -723,27 +909,32 @@ public class ConditionsEditorScreen extends ScaledScreen {
         g.pose().pushPose();
         g.pose().translate(0, 0, 400);
         g.fill(winX, winY, winX + winW, winY + winH, VanillaUIHelper.BG_DARK);
-        int bw = 280;
-        int bh = 32 + TYPES.size() * 26;
+        int rows = (TYPES.size() + 1) / 2;
+        int bw = 512;
+        int bh = 32 + rows * 26;
         int bx = (width - bw) / 2;
         int by = (height - bh) / 2;
+        int colGap = 6;
+        int colW = (bw - 12 - colGap) / 2;
         VanillaUIHelper.drawWindow(g, bx, by, bw, bh);
         g.drawCenteredString(font, Component.translatable("wh_npcs.ui.conditions.type_picker").getString(),
                 bx + bw / 2, by + 9, VanillaUIHelper.TEXT_YELLOW);
         String hoveredDetail = null;
         for (int i = 0; i < TYPES.size(); i++) {
             TypeInfo type = TYPES.get(i);
-            int y = by + 26 + i * 26;
-            boolean infoHover = isOver(mouseX, mouseY, bx + bw - 28, y + 4, 16, 16);
-            boolean hovered = !infoHover && isOver(mouseX, mouseY, bx + 6, y, bw - 12, 24);
-            VanillaUIHelper.drawButton(g, bx + 6, y, bw - 12, 24, hovered);
-            g.drawString(font, Component.translatable(type.label()).getString(), bx + 12, y + 4,
+            int col = i / rows;
+            int x = bx + 6 + col * (colW + colGap);
+            int y = by + 26 + (i % rows) * 26;
+            boolean infoHover = isOver(mouseX, mouseY, x + colW - 22, y + 4, 16, 16);
+            boolean hovered = !infoHover && isOver(mouseX, mouseY, x, y, colW, 24);
+            VanillaUIHelper.drawButton(g, x, y, colW, 24, hovered);
+            g.drawString(font, font.plainSubstrByWidth(
+                    Component.translatable(type.label()).getString(), colW - 30), x + 6, y + 4,
                     hovered ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE, false);
             g.drawString(font, font.plainSubstrByWidth(
-                            Component.translatable(type.description()).getString(), bw - 44), bx + 12, y + 14,
+                            Component.translatable(type.description()).getString(), colW - 30), x + 6, y + 14,
                     VanillaUIHelper.TEXT_DARK_GRAY, false);
-
-            g.drawCenteredString(font, "?", bx + bw - 20, y + 8,
+            g.drawCenteredString(font, "?", x + colW - 14, y + 8,
                     infoHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
             if (infoHover) {
                 hoveredDetail = Component.translatable(type.detail()).getString();
@@ -776,15 +967,20 @@ public class ConditionsEditorScreen extends ScaledScreen {
         recalc();
         if (typePicker) {
             if (button == 0) {
-                int bw = 280;
+                int rows = (TYPES.size() + 1) / 2;
+                int bw = 512;
                 int bx = (width - bw) / 2;
-                int by = (height - (32 + TYPES.size() * 26)) / 2;
+                int by = (height - (32 + rows * 26)) / 2;
+                int colGap = 6;
+                int colW = (bw - 12 - colGap) / 2;
                 for (int i = 0; i < TYPES.size(); i++) {
-                    int rowY = by + 26 + i * 26;
-                    if (isOver(mouseX, mouseY, bx + bw - 28, rowY + 4, 16, 16)) {
+                    int col = i / rows;
+                    int x = bx + 6 + col * (colW + colGap);
+                    int rowY = by + 26 + (i % rows) * 26;
+                    if (isOver(mouseX, mouseY, x + colW - 22, rowY + 4, 16, 16)) {
                         return true;
                     }
-                    if (isOver(mouseX, mouseY, bx + 6, rowY, bw - 12, 24)) {
+                    if (isOver(mouseX, mouseY, x, rowY, colW, 24)) {
                         typePicker = false;
                         addCondition(TYPES.get(i));
                         return true;
@@ -804,6 +1000,13 @@ public class ConditionsEditorScreen extends ScaledScreen {
                         selected = conditions.isEmpty() ? -1 : Math.min(selected, conditions.size() - 1);
                         loadDraft();
                         init(minecraft, width, height);
+                    } else if (isOver(mouseX, mouseY, leftX + LEFT_W - 30, y, 12, ROW_H)) {
+                        DialogueCondition c = conditions.get(i);
+                        boolean nowInv = !(c instanceof Conditions.Inverted);
+                        conditions.set(i, nowInv ? new Conditions.Inverted(unwrap(c)) : unwrap(c));
+                        if (i == selected) {
+                            invertDraft = nowInv;
+                        }
                     } else if (i != selected) {
                         selected = i;
                         loadDraft();
@@ -907,6 +1110,37 @@ public class ConditionsEditorScreen extends ScaledScreen {
                     return true;
                 }
                 return handleInventoryClick(mouseX, mouseY, invGridY(), rightClick);
+            }
+            case "weather" -> {
+                if (!rightClick) {
+                    String[] st = {"clear", "rain", "thunder"};
+                    for (int i = 0; i < 3; i++) {
+                        if (isOver(mouseX, mouseY, rightX + i * 84, mainY + 20, 80, 18)) {
+                            weatherState = st[i];
+                            writeBack();
+                            return true;
+                        }
+                    }
+                }
+            }
+            case "player_state" -> {
+                if (!rightClick && isOver(mouseX, mouseY, rightX, mainY + 70, 180, 18)) {
+                    String[] modes = {"off", "any", "all", "any_effect", "no_effect"};
+                    int idx = 0;
+                    for (int i = 0; i < modes.length; i++) {
+                        if (modes[i].equals(effectMode)) {
+                            idx = i;
+                        }
+                    }
+                    effectMode = modes[(idx + 1) % modes.length];
+                    writeBack();
+                    return true;
+                }
+                if (!rightClick && (effectMode.equals("any") || effectMode.equals("all"))
+                        && isOver(mouseX, mouseY, rightX + 186, mainY + 70, 120, 18) && minecraft != null) {
+                    minecraft.setScreen(new EffectPickerScreen(this, draftEffects, this::writeBack));
+                    return true;
+                }
             }
             default -> {
             }

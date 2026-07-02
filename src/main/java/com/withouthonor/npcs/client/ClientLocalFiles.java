@@ -71,7 +71,7 @@ public final class ClientLocalFiles {
                             int kb = (int) Math.max(1, Files.size(p) / 1024);
                             long mt = Files.getLastModifiedTime(p).toMillis();
                             out.add(new com.withouthonor.npcs.network.ProfileSharePackets.FileEntry(
-                                    name, author == null ? "" : author, kb, mt));
+                                    name, author == null ? "" : author, "", kb, mt));
                         } catch (IOException ignored) {
                         }
                     });

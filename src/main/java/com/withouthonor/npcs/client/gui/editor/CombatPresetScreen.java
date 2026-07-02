@@ -66,7 +66,9 @@ public class CombatPresetScreen extends ScaledScreen {
         winY = (height - winH) / 2;
         listTop = winY + HEADER_H + 8;
         descTop = listTop + NpcEditorScreen.PRESET_IDS.length * ROW_H + 8;
-        optTop = descTop + 38;
+        int descLines = Component.translatable(NpcEditorScreen.PRESET_DESC_KEYS[presetIdx()])
+                .getString().split("\n").length;
+        optTop = descTop + Math.max(38, descLines * 10 + 6);
         bottomY = winY + winH - PAD - 20;
     }
 

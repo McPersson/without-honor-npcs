@@ -10,4 +10,6 @@ public interface EmotecraftClientBridge {
                        ModelPart leftArm, ModelPart rightLeg, ModelPart leftLeg);
 
     boolean applyBodyTransform(CompanionEntity npc, PoseStack poseStack, float partialTick);
+
+    boolean isPlaying(CompanionEntity npc);
 }

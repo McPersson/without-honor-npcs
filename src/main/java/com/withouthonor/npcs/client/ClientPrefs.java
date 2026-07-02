@@ -251,6 +251,16 @@ public class ClientPrefs {
         toggle(pinnedPoses, name);
     }
 
+    public void renamePose(String oldName, String newName) {
+        if (favoritePoses.remove(oldName)) {
+            favoritePoses.add(newName);
+        }
+        if (pinnedPoses.remove(oldName)) {
+            pinnedPoses.add(newName);
+        }
+        save();
+    }
+
     public boolean isFavoriteEmote(String id) {
         return favoriteEmotes.contains(id);
     }

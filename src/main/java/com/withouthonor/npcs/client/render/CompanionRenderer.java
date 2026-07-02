@@ -31,9 +31,6 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
 
     private static final String DEFAULT_SKIN_SPEC = "default:alessia";
 
-    private static final ResourceLocation EMOTE_ATLAS =
-            ResourceLocation.fromNamespaceAndPath("wh_npcs", "textures/entity/emotes.png");
-
     private final PlayerModel<CompanionEntity> wideModel;
     private final PlayerModel<CompanionEntity> slimModel;
 
@@ -63,10 +60,7 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
     @Override
     public void render(CompanionEntity entity, float entityYaw, float partialTicks,
                        PoseStack poseStack, MultiBufferSource buffer, int packedLight) {
-        List<FormattedCharSequence> bubbleLines = bubbleLines(entity);
-        renderSpeechBubble(entity, poseStack, buffer, packedLight, bubbleLines);
-        renderEmote(entity, poseStack, buffer);
-        renderIndicator(entity, poseStack, buffer, bubbleLines);
+        CompanionOverlays.INSTANCE.renderOverlays(entity, poseStack, buffer, packedLight, partialTicks);
         String disguise = entity.getDisguise();
         if (!disguise.isEmpty()) {
             Entity delegate = delegateFor(entity, disguise);
@@ -79,6 +73,7 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
 
         boolean slim = skin != null ? skin.slim() : entity.getSkinName().isEmpty();
         this.model = slim ? slimModel : wideModel;
+        applyArmPoses(entity);
 
         CompanionEntity.RenderTransform t = entity.getRenderTransform();
         double dy = (entity.isSitting() ? -0.4D : 0.0D) + t.posY();
@@ -91,6 +86,44 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
         } else {
             super.render(entity, entityYaw, partialTicks, poseStack, buffer, packedLight);
         }
+    }
+
+    private void applyArmPoses(CompanionEntity entity) {
+        net.minecraft.client.model.HumanoidModel.ArmPose main = armPose(entity, net.minecraft.world.InteractionHand.MAIN_HAND);
+        net.minecraft.client.model.HumanoidModel.ArmPose off = armPose(entity, net.minecraft.world.InteractionHand.OFF_HAND);
+        boolean right = entity.getMainArm() == net.minecraft.world.entity.HumanoidArm.RIGHT;
+        this.model.rightArmPose = right ? main : off;
+        this.model.leftArmPose = right ? off : main;
+    }
+
+    private static net.minecraft.client.model.HumanoidModel.ArmPose armPose(CompanionEntity e,
+                                                                            net.minecraft.world.InteractionHand hand) {
+        net.minecraft.world.item.ItemStack stack = e.getItemInHand(hand);
+        if (stack.isEmpty()) {
+            return net.minecraft.client.model.HumanoidModel.ArmPose.EMPTY;
+        }
+        if (e.getUsedItemHand() == hand && e.getUseItemRemainingTicks() > 0) {
+            net.minecraft.world.item.UseAnim anim = stack.getUseAnimation();
+            if (anim == net.minecraft.world.item.UseAnim.BOW) {
+                return net.minecraft.client.model.HumanoidModel.ArmPose.BOW_AND_ARROW;
+            }
+            if (anim == net.minecraft.world.item.UseAnim.CROSSBOW) {
+                return net.minecraft.client.model.HumanoidModel.ArmPose.CROSSBOW_CHARGE;
+            }
+            if (anim == net.minecraft.world.item.UseAnim.SPEAR) {
+                return net.minecraft.client.model.HumanoidModel.ArmPose.THROW_SPEAR;
+            }
+            if (anim == net.minecraft.world.item.UseAnim.BLOCK) {
+                return net.minecraft.client.model.HumanoidModel.ArmPose.BLOCK;
+            }
+            if (anim == net.minecraft.world.item.UseAnim.SPYGLASS) {
+                return net.minecraft.client.model.HumanoidModel.ArmPose.SPYGLASS;
+            }
+        } else if (!e.swinging && stack.getItem() instanceof net.minecraft.world.item.CrossbowItem
+                && net.minecraft.world.item.CrossbowItem.isCharged(stack)) {
+            return net.minecraft.client.model.HumanoidModel.ArmPose.CROSSBOW_HOLD;
+        }
+        return net.minecraft.client.model.HumanoidModel.ArmPose.ITEM;
     }
 
     @Override
@@ -203,144 +236,11 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
         return super.getRenderType(entity, visible, translucentToPlayer, glowing);
     }
 
-    private record BubbleCache(String text, List<FormattedCharSequence> lines) {
-    }
-
-    private final Map<Integer, BubbleCache> bubbleCache = new HashMap<>();
-    private final Map<String, net.minecraft.network.chat.Component> titleCache = new HashMap<>();
-
-    @Nullable
-    private List<FormattedCharSequence> bubbleLines(CompanionEntity entity) {
-        if (this.entityRenderDispatcher.distanceToSqr(entity) > 1024.0D) {
-            return null;
-        }
-        int id = entity.getId();
-        String text = com.withouthonor.npcs.client.ClientBubbles.get(id);
-        if (text == null) {
-            bubbleCache.remove(id);
-            return null;
-        }
-        BubbleCache cached = bubbleCache.get(id);
-        if (cached != null && cached.text().equals(text)) {
-            return cached.lines();
-        }
-        List<FormattedCharSequence> lines =
-                this.getFont().split(net.minecraft.network.chat.Component.literal(text), 110);
-        bubbleCache.put(id, new BubbleCache(text, lines));
-        return lines;
-    }
-
-    private void renderSpeechBubble(CompanionEntity entity, PoseStack poseStack,
-                                    MultiBufferSource buffer, int packedLight,
-                                    @Nullable List<FormattedCharSequence> lines) {
-        if (lines == null) {
-            return;
-        }
-        var font = this.getFont();
-        poseStack.pushPose();
-        poseStack.translate(0.0F, entity.getNameTagOffsetY() + 0.35F + lines.size() * 0.22F, 0.0F);
-        poseStack.mulPose(this.entityRenderDispatcher.cameraOrientation());
-        poseStack.scale(-0.02F, -0.02F, 0.02F);
-        org.joml.Matrix4f matrix = poseStack.last().pose();
-        int bg = 0x66000000;
-        for (int i = 0; i < lines.size(); i++) {
-            var line = lines.get(i);
-            float x = -font.width(line) / 2.0F;
-            float y = i * 10.0F;
-            font.drawInBatch(line, x, y, 0x20FFFFFF, false, matrix, buffer,
-                    net.minecraft.client.gui.Font.DisplayMode.SEE_THROUGH, bg, packedLight);
-            font.drawInBatch(line, x, y, 0xFFFFFFFF, false, matrix, buffer,
-                    net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, packedLight);
-        }
-        poseStack.popPose();
-    }
-
-    private void renderEmote(CompanionEntity entity, PoseStack poseStack, MultiBufferSource buffer) {
-
-        if (Minecraft.getInstance().screen instanceof DialogueScreen) {
-            return;
-        }
-        com.withouthonor.npcs.common.dialogue.EmoteIcon icon =
-                com.withouthonor.npcs.client.ClientEmotes.get(entity.getId());
-        if (icon == null || this.entityRenderDispatcher.distanceToSqr(entity) > 1024.0D) {
-            return;
-        }
-        drawHeadIcon(poseStack, buffer, icon, entity.getNameTagOffsetY() + 0.45F);
-    }
-
-    private void renderIndicator(CompanionEntity entity, PoseStack poseStack, MultiBufferSource buffer,
-                                 @Nullable List<FormattedCharSequence> bubbleLines) {
-        if (Minecraft.getInstance().screen instanceof DialogueScreen) {
-            return;
-        }
-
-        if (com.withouthonor.npcs.client.ClientEmotes.get(entity.getId()) != null) {
-            return;
-        }
-        com.withouthonor.npcs.common.dialogue.EmoteIcon icon =
-                com.withouthonor.npcs.client.ClientIndicators.get(entity.getId());
-        if (icon == null || this.entityRenderDispatcher.distanceToSqr(entity) > 1024.0D) {
-            return;
-        }
-
-        float y = bubbleLines != null
-                ? entity.getNameTagOffsetY() + 0.35F + bubbleLines.size() * 0.22F + 0.32F
-                : entity.getNameTagOffsetY() + 0.45F;
-        drawHeadIcon(poseStack, buffer, icon, y);
-    }
-
-    private void drawHeadIcon(PoseStack poseStack, MultiBufferSource buffer,
-                              com.withouthonor.npcs.common.dialogue.EmoteIcon icon, float yOffset) {
-        int frames = com.withouthonor.npcs.common.dialogue.EmoteIcon.COUNT;
-        float u0 = icon.atlasIndex() / (float) frames;
-        float u1 = (icon.atlasIndex() + 1) / (float) frames;
-        poseStack.pushPose();
-
-        poseStack.translate(0.0F, yOffset, 0.0F);
-        poseStack.mulPose(this.entityRenderDispatcher.cameraOrientation());
-        poseStack.scale(-0.4F, -0.4F, 0.4F);
-        org.joml.Matrix4f m = poseStack.last().pose();
-        var vc = buffer.getBuffer(RenderType.text(EMOTE_ATLAS));
-        int light = net.minecraft.client.renderer.LightTexture.FULL_BRIGHT;
-        float h = 0.5F;
-        vc.vertex(m, -h, -h, 0.0F).color(255, 255, 255, 255).uv(u0, 0.0F).uv2(light).endVertex();
-        vc.vertex(m, -h,  h, 0.0F).color(255, 255, 255, 255).uv(u0, 1.0F).uv2(light).endVertex();
-        vc.vertex(m,  h,  h, 0.0F).color(255, 255, 255, 255).uv(u1, 1.0F).uv2(light).endVertex();
-        vc.vertex(m,  h, -h, 0.0F).color(255, 255, 255, 255).uv(u1, 0.0F).uv2(light).endVertex();
-        poseStack.popPose();
-    }
-
     @Override
     protected void renderNameTag(CompanionEntity entity, net.minecraft.network.chat.Component displayName,
                                  PoseStack poseStack, MultiBufferSource buffer, int packedLight) {
         super.renderNameTag(entity, displayName, poseStack, buffer, packedLight);
-        String title = entity.getTitle();
-        if (title.isEmpty() || this.entityRenderDispatcher.distanceToSqr(entity) > 4096.0D) {
-            return;
-        }
-
-        net.minecraft.network.chat.Component text = titleCache.computeIfAbsent(title, t ->
-                net.minecraft.network.chat.Component.literal(t.indexOf('§') >= 0 ? t : "§7" + t));
-        poseStack.pushPose();
-        poseStack.translate(0.0F, entity.getNameTagOffsetY(), 0.0F);
-        poseStack.mulPose(this.entityRenderDispatcher.cameraOrientation());
-        float scale = 0.025F * 0.75F;
-        poseStack.scale(-scale, -scale, scale);
-        org.joml.Matrix4f matrix = poseStack.last().pose();
-        int bg = (int) (Minecraft.getInstance().options.getBackgroundOpacity(0.25F) * 255.0F) << 24;
-        net.minecraft.client.gui.Font font = this.getFont();
-        float x = -font.width(text) / 2.0F;
-
-        float y = 12.5F;
-        boolean visible = !entity.isDiscrete();
-        font.drawInBatch(text, x, y, 0x20FFFFFF, false, matrix, buffer,
-                visible ? net.minecraft.client.gui.Font.DisplayMode.SEE_THROUGH
-                        : net.minecraft.client.gui.Font.DisplayMode.NORMAL, bg, packedLight);
-        if (visible) {
-            font.drawInBatch(text, x, y, -1, false, matrix, buffer,
-                    net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, packedLight);
-        }
-        poseStack.popPose();
+        CompanionOverlays.INSTANCE.renderTitle(entity, poseStack, buffer, packedLight);
     }
 
     @Override

@@ -17,16 +17,16 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 public class SkinService {
 
     private static final Gson GSON = new Gson();
     private static final int MAX_SKIN_BYTES = 262144;
+    private static final long FAIL_TTL_MS = 5L * 60L * 1000L;
+    private static final Duration REQ_TIMEOUT = Duration.ofSeconds(15);
     private static final String USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -40,7 +40,7 @@ public class SkinService {
     private final MinecraftServer server;
     private final Path skinsDir;
     private final Map<String, CompletableFuture<SkinData>> pending = new HashMap<>();
-    private final Set<String> failed = new HashSet<>();
+    private final Map<String, Long> failed = new HashMap<>();
 
     public record SkinData(boolean slim, byte[] bytes) {
     }
@@ -75,6 +75,22 @@ public class SkinService {
         failed.remove(spec.toLowerCase(Locale.ROOT));
     }
 
+    private void markFail(String key) {
+        failed.put(key, System.currentTimeMillis());
+    }
+
+    private boolean recentlyFailed(String key) {
+        Long t = failed.get(key);
+        if (t == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() - t >= FAIL_TTL_MS) {
+            failed.remove(key);
+            return false;
+        }
+        return true;
+    }
+
     public CompletableFuture<SkinData> fetch(String rawSpec) {
         String spec = rawSpec.trim();
         Boolean forcedSlim = null;
@@ -87,7 +103,7 @@ public class SkinService {
             spec = spec.substring(0, spec.length() - 5).trim();
         }
         String key = spec.toLowerCase(Locale.ROOT);
-        if (failed.contains(key)) {
+        if (recentlyFailed(key)) {
             return CompletableFuture.failedFuture(new IllegalStateException("Skin fetch already failed: " + spec));
         }
         DefaultSkins.DefaultSkin defaultSkin = DefaultSkins.bySpec(spec);
@@ -113,7 +129,7 @@ public class SkinService {
 
     private CompletableFuture<SkinData> fetchByNickname(String name) {
         if (!name.matches("[a-z0-9_]{1,16}")) {
-            failed.add(name);
+            markFail(name);
             return CompletableFuture.failedFuture(new IllegalArgumentException("Bad player name: " + name));
         }
         String cacheName = "name_" + name;
@@ -129,7 +145,7 @@ public class SkinService {
                         n, err != null ? err.getMessage() : "no data");
                 return stale;
             }
-            failed.add(n);
+            markFail(n);
             throw new java.util.concurrent.CompletionException(err != null ? err
                     : new IllegalStateException("No skin for " + n));
         }, server));
@@ -138,13 +154,13 @@ public class SkinService {
     private CompletableFuture<SkinData> fetchBundled(String id, String key, boolean slim) {
         try (var in = SkinService.class.getResourceAsStream(DefaultSkins.bundledResourcePath(id))) {
             if (in == null) {
-                failed.add(key);
+                markFail(key);
                 return CompletableFuture.failedFuture(
                         new IllegalStateException("Bundled skin resource missing: " + id));
             }
             return CompletableFuture.completedFuture(new SkinData(slim, in.readAllBytes()));
         } catch (IOException e) {
-            failed.add(key);
+            markFail(key);
             return CompletableFuture.failedFuture(e);
         }
     }
@@ -152,18 +168,18 @@ public class SkinService {
     private CompletableFuture<SkinData> fetchLocalFile(String fileName, boolean slim) {
         String key = fileName.toLowerCase(Locale.ROOT);
         if (!fileName.matches("[a-zA-Z0-9_\\-]{1,64}\\.png")) {
-            failed.add(key);
+            markFail(key);
             return CompletableFuture.failedFuture(new IllegalArgumentException("Bad skin file name: " + fileName));
         }
         try {
             java.nio.file.Path file = skinsDir.resolve(fileName);
             if (!Files.isRegularFile(file)) {
-                failed.add(key);
+                markFail(key);
                 return CompletableFuture.failedFuture(new IllegalStateException("Skin file not found: " + fileName));
             }
             return CompletableFuture.completedFuture(new SkinData(slim, Files.readAllBytes(file)));
         } catch (IOException e) {
-            failed.add(key);
+            markFail(key);
             return CompletableFuture.failedFuture(e);
         }
     }
@@ -180,7 +196,7 @@ public class SkinService {
                 .whenCompleteAsync((data, err) -> {
                     pending.remove(k);
                     if (err != null) {
-                        failed.add(k);
+                        markFail(k);
                         WHCompanions.LOGGER.warn("Failed to fetch skin url '{}': {}", url, err.getMessage());
                     } else {
                         writeDiskCache(cacheName, data);
@@ -244,7 +260,7 @@ public class SkinService {
 
     private static CompletableFuture<JsonObject> getJson(String url) {
         HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .header("User-Agent", USER_AGENT).GET().build();
+                .header("User-Agent", USER_AGENT).timeout(REQ_TIMEOUT).GET().build();
         return HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
                 .thenApply(response -> {
                     if (response.statusCode() != 200) {
@@ -259,6 +275,7 @@ public class SkinService {
                 .header("User-Agent", USER_AGENT)
                 .header("Accept", "image/png,image/*,*/*;q=0.8")
                 .header("Accept-Language", "en-US,en;q=0.9")
+                .timeout(REQ_TIMEOUT)
                 .GET().build();
         return HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
                 .thenApply(response -> {

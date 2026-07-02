@@ -176,6 +176,10 @@ public class VanillaUIHelper {
         g.fill(x + 8, y, x + 10, y + 2, c);
     }
 
+    public static void drawRenameIcon(GuiGraphics g, Font font, int x, int y, int color) {
+        g.drawString(font, "✎", x, y, color, false);
+    }
+
     public static void drawItemSlot(GuiGraphics g, int x, int y) {
         drawItemSlot(g, x, y, false);
     }

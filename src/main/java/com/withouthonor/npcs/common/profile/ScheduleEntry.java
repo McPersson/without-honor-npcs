@@ -17,7 +17,15 @@ public record ScheduleEntry(int time, int x, int y, int z, String pose, int radi
     }
 
     public boolean isCustomPose() {
-        return poseSnapshot != null && !poseSnapshot.isEmpty();
+        return poseSnapshot != null && poseSnapshot.contains("\"pose\"");
+    }
+
+    public boolean hasTransform() {
+        return poseSnapshot != null && poseSnapshot.contains("\"transform\"");
+    }
+
+    public boolean freezeYaw() {
+        return poseSnapshot != null && poseSnapshot.contains("\"freeze\":true");
     }
 
     public static ScheduleEntry fromJson(JsonObject o) {
