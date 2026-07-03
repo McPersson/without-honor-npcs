@@ -75,7 +75,15 @@ public class ActionsEditorScreen extends ScaledScreen {
             new TypeInfo("follow_wait", "wh_npcs.ui.act.type.follow_wait.label",
                     "wh_npcs.ui.act.type.follow_wait.desc", "wh_npcs.ui.act.type.follow_wait.detail"),
             new TypeInfo("effect", "wh_npcs.ui.act.type.effect.label",
-                    "wh_npcs.ui.act.type.effect.desc", "wh_npcs.ui.act.type.effect.detail"));
+                    "wh_npcs.ui.act.type.effect.desc", "wh_npcs.ui.act.type.effect.detail"),
+            new TypeInfo("transform", "wh_npcs.ui.act.type.transform.label",
+                    "wh_npcs.ui.act.type.transform.desc", "wh_npcs.ui.act.type.transform.detail"),
+            new TypeInfo("attack_player", "wh_npcs.ui.act.type.attack_player.label",
+                    "wh_npcs.ui.act.type.attack_player.desc", "wh_npcs.ui.act.type.attack_player.detail"),
+            new TypeInfo("edit_profile", "wh_npcs.ui.act.type.edit_profile.label",
+                    "wh_npcs.ui.act.type.edit_profile.desc", "wh_npcs.ui.act.type.edit_profile.detail"),
+            new TypeInfo("combat_stats", "wh_npcs.ui.act.type.combat_stats.label",
+                    "wh_npcs.ui.act.type.combat_stats.desc", "wh_npcs.ui.act.type.combat_stats.detail"));
 
     private final Screen parent;
     private final List<DialogueAction> actions;
@@ -125,6 +133,38 @@ public class ActionsEditorScreen extends ScaledScreen {
     private String effectMode = "apply";
     private boolean effectRemoveAll;
     private List<Actions.EffectSpec> effectSpecs = new ArrayList<>();
+
+    // «Преображение» — файл экспорта и флаг снаряжения
+    private String transformFile = "";
+    private boolean transformEquipment;
+
+    // «Атаковать игрока» — со-фракционники, все игроки рядом и общий радиус
+    private boolean attackAllies;
+    private boolean atkAllPlayers;
+    private int attackRadius = 16;
+    @Nullable
+    private EditBox radiusBox;
+
+    // «Изменить профиль» — пустое поле = не менять; RichTextEditor даёт тулбар
+    // стилей/цветов по выделению — как у имени/титула во вкладке «Профиль»
+    private com.withouthonor.npcs.client.gui.RichTextEditor epNameBox;
+    private com.withouthonor.npcs.client.gui.RichTextEditor epTitleBox;
+    private String epSkin = "";
+    private String epFaction = "";
+    @Nullable
+    private String epFactionTip;
+
+    // «Боевые параметры» — пустое поле/галочка = не менять
+    private static final String[] CS_PRESET_IDS = {"", "passive", "melee", "shield", "bow", "potion"};
+    private static final String[] CS_TARGET_IDS =
+            {"players", "monsters", "animals", "villagers", "npcs", "factions"};
+    private String csPreset = "";
+    private boolean csTargetsEnabled;
+    private final boolean[] csTargets = new boolean[CS_TARGET_IDS.length];
+    private boolean csHeal;
+    private EditBox csHpBox;
+    private EditBox csDamageBox;
+    private EditBox csArmorBox;
 
     private EditBox monoNameBox;
     private EditBox monoPortraitBox;
@@ -371,24 +411,95 @@ public class ActionsEditorScreen extends ScaledScreen {
                 MonologueLine line = monoLines.get(monoPage);
                 int monoFieldX = rightX + 60;
                 monoNameBox = addRenderableWidget(new SelectableEditBox(font, monoFieldX, edY() + 24,
-                        rightW - 64, 16, Component.translatable("wh_npcs.ui.actions.mono_name_field")));
+                        rightW - 72, 16, Component.translatable("wh_npcs.ui.actions.mono_name_field")));
                 monoNameBox.setMaxLength(64);
                 monoNameBox.setValue(EditorCodes.toEditor(line.name()));
                 monoNameBox.setHint(Component.translatable("wh_npcs.ui.actions.mono_name_hint"));
                 monoNameBox.setResponder(v -> writeBack());
                 monoPortraitBox = addRenderableWidget(new SelectableEditBox(font, monoFieldX, edY() + 46,
-                        rightW - 64, 16, Component.translatable("wh_npcs.ui.actions.mono_portrait_field")));
+                        rightW - 72, 16, Component.translatable("wh_npcs.ui.actions.mono_portrait_field")));
                 monoPortraitBox.setMaxLength(48);
                 monoPortraitBox.setValue(line.portrait());
                 monoPortraitBox.setHint(Component.translatable("wh_npcs.ui.actions.mono_portrait_hint"));
                 monoPortraitBox.setResponder(v -> writeBack());
                 monoTextEditor = addRenderableWidget(new com.withouthonor.npcs.client.gui.RichTextEditor(
-                        font, rightX, edY() + 84, rightW, 56));
+                        font, rightX, edY() + 84, rightW - 12, 56));
                 monoTextEditor.setValue(line.text());
+            }
+            case "attack_player" -> {
+                // радиус общий: созыв союзников и поиск игроков вокруг инициатора
+                if (attackAllies || atkAllPlayers) {
+                    // сдвиг вправо на 15px — слева от поля кнопка «−» скраба
+                    radiusBox = addRenderableWidget(new SelectableEditBox(font, rightX + 75, edY() + 54, 40, 16,
+                            Component.translatable("wh_npcs.ui.actions.atk_radius")));
+                    radiusBox.setMaxLength(2);
+                    radiusBox.setValue(String.valueOf(attackRadius));
+                    radiusBox.setResponder(v -> {
+                        attackRadius = Math.max(4, Math.min(48, parseInt(radiusBox, 16)));
+                        writeBack();
+                    });
+                    scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(radiusBox, 4, 48, 2, 0.2F,
+                            "16", true, () -> setFocused(null)));
+                } else {
+                    radiusBox = null;
+                }
+            }
+            case "edit_profile" -> {
+                Actions.EditProfile ep = (Actions.EditProfile) action;
+                // редакторы с тулбаром стилей по выделению — зеркально вкладке «Профиль» NpcEditorScreen:
+                // имя — полный набор стилей+цветов, титул — только цвет; значения хранятся с §-кодами
+                epNameBox = addRenderableWidget(new com.withouthonor.npcs.client.gui.RichTextEditor(
+                        font, rightX + 60, edY() + 2, 168, 18).singleLine());
+                epNameBox.setValue(ep.name());
+                epNameBox.setHint(Component.translatable("wh_npcs.ui.actions.keep_value"));
+                epTitleBox = addRenderableWidget(new com.withouthonor.npcs.client.gui.RichTextEditor(
+                        font, rightX + 60, edY() + 26, 168, 18).singleLine().colorOnly());
+                epTitleBox.setValue(ep.title());
+                epTitleBox.setHint(Component.translatable("wh_npcs.ui.actions.keep_value"));
+                // подсказка со списком фракций — как у действия «Репутация»
+                StringBuilder available = new StringBuilder(
+                        Component.translatable("wh_npcs.ui.actions.faction_tip_title").getString());
+                if (ClientFactions.all().isEmpty()) {
+                    available.append(Component.translatable("wh_npcs.ui.actions.faction_tip_empty").getString());
+                } else {
+                    available.append(Component.translatable("wh_npcs.ui.actions.faction_tip_available").getString());
+                    for (var info : ClientFactions.all()) {
+                        available.append("\n§b").append(info.id()).append(" §8— §7").append(info.name());
+                    }
+                }
+                epFactionTip = available.toString();
+            }
+            case "combat_stats" -> {
+                Actions.CombatStats cs = (Actions.CombatStats) action;
+                // поля со сдвигом — по бокам кнопки −/+ скраба; пусто = не менять
+                csHpBox = csField(rightX + 50, edY() + 88, cs.hp());
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(csHpBox, 1, 1024, 5, 0.5F,
+                        "", true, () -> setFocused(null)));
+                csDamageBox = csField(rightX + 165, edY() + 88, cs.damage());
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(csDamageBox, 0, 1024, 1, 0.2F,
+                        "", true, () -> setFocused(null)));
+                csArmorBox = csField(rightX + 290, edY() + 88, cs.armor());
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(csArmorBox, 0, 30, 1, 0.2F,
+                        "", true, () -> setFocused(null)));
             }
             default -> {
             }
         }
+    }
+
+    /** Поле боевого параметра: пусто = «не менять». */
+    private EditBox csField(int x, int y, @Nullable Float value) {
+        EditBox b = addRenderableWidget(new SelectableEditBox(font, x, y, 40, 16, Component.empty()));
+        b.setMaxLength(6);
+        b.setValue(value != null ? com.withouthonor.npcs.client.gui.NumberScrub.fmt(value, false) : "");
+        b.setResponder(v -> writeBack());
+        return b;
+    }
+
+    private static String presetLabel(String id) {
+        return id.isEmpty()
+                ? Component.translatable("wh_npcs.ui.actions.keep_value").getString()
+                : Component.translatable("wh_npcs.ui.npc.preset_" + id).getString();
     }
 
     private void loadDraft() {
@@ -427,6 +538,39 @@ public class ActionsEditorScreen extends ScaledScreen {
             effectSpecs = new ArrayList<>(eff.effects());
         } else if (action instanceof Actions.Sound snd) {
             soundDraft = snd.soundId();
+        }
+        transformFile = "";
+        transformEquipment = false;
+        attackAllies = false;
+        atkAllPlayers = false;
+        attackRadius = 16;
+        epSkin = "";
+        epFaction = "";
+        csPreset = "";
+        csTargetsEnabled = false;
+        java.util.Arrays.fill(csTargets, false);
+        csHeal = false;
+        if (action instanceof Actions.Transform tr) {
+            transformFile = tr.file();
+            transformEquipment = tr.equipment();
+        } else if (action instanceof Actions.AttackPlayer ap) {
+            attackAllies = ap.allies();
+            attackRadius = ap.alliesRadius();
+            atkAllPlayers = ap.allPlayers();
+        } else if (action instanceof Actions.EditProfile ep) {
+            epSkin = ep.skin();
+            epFaction = ep.faction();
+        } else if (action instanceof Actions.CombatStats cs) {
+            csPreset = cs.preset();
+            csHeal = cs.heal();
+            csTargetsEnabled = !cs.aggroTargets().isBlank();
+            for (String t : cs.aggroTargets().split(",")) {
+                for (int i = 0; i < CS_TARGET_IDS.length; i++) {
+                    if (CS_TARGET_IDS[i].equals(t.trim())) {
+                        csTargets[i] = true;
+                    }
+                }
+            }
         }
         monoLines = new ArrayList<>();
         monoPage = 0;
@@ -549,6 +693,31 @@ public class ActionsEditorScreen extends ScaledScreen {
                 }
                 case "effect" -> actions.set(selected,
                         new Actions.Effect(effectMode, List.copyOf(effectSpecs), effectRemoveAll));
+                case "transform" -> actions.set(selected,
+                        new Actions.Transform(transformFile, transformEquipment));
+                case "attack_player" -> actions.set(selected, new Actions.AttackPlayer(
+                        attackAllies, Math.max(4, Math.min(48, attackRadius)), atkAllPlayers));
+                case "edit_profile" -> actions.set(selected, new Actions.EditProfile(
+                        // RichTextEditor хранит §-коды напрямую — без конверсии EditorCodes
+                        epNameBox != null ? epNameBox.getValue().trim() : "",
+                        epTitleBox != null ? epTitleBox.getValue().trim() : "",
+                        epSkin, epFaction));
+                case "combat_stats" -> {
+                    StringBuilder targets = new StringBuilder();
+                    if (csTargetsEnabled) {
+                        for (int i = 0; i < CS_TARGET_IDS.length; i++) {
+                            if (csTargets[i]) {
+                                if (targets.length() > 0) {
+                                    targets.append(',');
+                                }
+                                targets.append(CS_TARGET_IDS[i]);
+                            }
+                        }
+                    }
+                    actions.set(selected, new Actions.CombatStats(csPreset, targets.toString(),
+                            parseOptFloat(csHpBox), parseOptFloat(csDamageBox),
+                            parseOptFloat(csArmorBox), csHeal));
+                }
                 default -> {
                 }
             }
@@ -568,6 +737,19 @@ public class ActionsEditorScreen extends ScaledScreen {
             return Integer.parseInt(box.getValue().trim());
         } catch (NumberFormatException e) {
             return def;
+        }
+    }
+
+    /** Пустое/некорректное поле = null («не менять»). */
+    @Nullable
+    private static Float parseOptFloat(@Nullable EditBox box) {
+        if (box == null || box.getValue().trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return Float.parseFloat(box.getValue().trim().replace(',', '.'));
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
@@ -606,6 +788,10 @@ public class ActionsEditorScreen extends ScaledScreen {
             case "stop_follow" -> new Actions.StopFollow();
             case "follow_wait" -> new Actions.FollowWait();
             case "effect" -> new Actions.Effect("apply", List.of(), false);
+            case "transform" -> new Actions.Transform("", false);
+            case "attack_player" -> new Actions.AttackPlayer(false, 16, false);
+            case "edit_profile" -> new Actions.EditProfile("", "", "", "");
+            case "combat_stats" -> new Actions.CombatStats("", "", null, null, null, false);
             case "run_command" -> new Actions.RunCommand(
                     Component.translatable("wh_npcs.ui.actions.command_hint").getString());
             case "sound" -> new Actions.Sound(
@@ -749,6 +935,55 @@ public class ActionsEditorScreen extends ScaledScreen {
             }
             return Component.translatable("wh_npcs.ui.actions.sum_effect_apply",
                     eff.effects().size()).getString();
+        }
+        if (action instanceof Actions.Transform tr) {
+            return Component.translatable("wh_npcs.ui.actions.sum_transform",
+                    tr.file().isBlank() ? "—" : tr.file()).getString();
+        }
+        if (action instanceof Actions.AttackPlayer) {
+            return Component.translatable("wh_npcs.ui.actions.sum_attack").getString();
+        }
+        if (action instanceof Actions.EditProfile ep) {
+            List<String> parts = new ArrayList<>();
+            if (!ep.name().isBlank()) {
+                parts.add(Component.translatable("wh_npcs.ui.actions.sum_f_name").getString());
+            }
+            if (!ep.title().isBlank()) {
+                parts.add(Component.translatable("wh_npcs.ui.actions.sum_f_title").getString());
+            }
+            if (!ep.skin().isBlank()) {
+                parts.add(Component.translatable("wh_npcs.ui.actions.sum_f_skin").getString());
+            }
+            if (!ep.faction().isBlank()) {
+                parts.add(Component.translatable("wh_npcs.ui.actions.sum_f_faction").getString());
+            }
+            return Component.translatable("wh_npcs.ui.actions.sum_profile", parts.isEmpty()
+                    ? Component.translatable("wh_npcs.ui.actions.sum_f_none").getString()
+                    : String.join(", ", parts)).getString();
+        }
+        if (action instanceof Actions.CombatStats cs) {
+            List<String> parts = new ArrayList<>();
+            if (!cs.preset().isBlank()) {
+                parts.add(Component.translatable("wh_npcs.ui.actions.sum_f_preset").getString());
+            }
+            if (!cs.aggroTargets().isBlank()) {
+                parts.add(Component.translatable("wh_npcs.ui.actions.sum_f_targets").getString());
+            }
+            if (cs.hp() != null) {
+                parts.add("HP");
+            }
+            if (cs.damage() != null) {
+                parts.add(Component.translatable("wh_npcs.ui.actions.sum_f_damage").getString());
+            }
+            if (cs.armor() != null) {
+                parts.add(Component.translatable("wh_npcs.ui.actions.sum_f_armor").getString());
+            }
+            if (cs.heal()) {
+                parts.add(Component.translatable("wh_npcs.ui.actions.sum_f_heal").getString());
+            }
+            return Component.translatable("wh_npcs.ui.actions.sum_combat", parts.isEmpty()
+                    ? Component.translatable("wh_npcs.ui.actions.sum_f_none").getString()
+                    : String.join(", ", parts)).getString();
         }
         return action.type();
     }
@@ -956,7 +1191,7 @@ public class ActionsEditorScreen extends ScaledScreen {
                 boolean lockHover = isOver(mouseX, mouseY, rightX, cy, 132, 12);
                 VanillaUIHelper.drawButton(g, rightX, cy, 12, 12, lockHover);
                 if (monoLock) {
-                    g.drawCenteredString(font, "§a✓", rightX + 6, cy + 2, VanillaUIHelper.TEXT_WHITE);
+                    VanillaUIHelper.drawCheck(g, rightX + 1, cy + 2, VanillaUIHelper.TEXT_GREEN);
                 }
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.mono_lock").getString(),
                         rightX + 18, cy + 2,
@@ -1003,6 +1238,147 @@ public class ActionsEditorScreen extends ScaledScreen {
                                 .getString(), rightX, edY() + 68, VanillaUIHelper.TEXT_DARK_GRAY, false);
                     }
                 }
+            }
+            case "transform" -> {
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.tf_file_label").getString(),
+                        rightX, edY() + 2, VanillaUIHelper.TEXT_GRAY, false);
+                String file = transformFile.isBlank() ? "—" : transformFile;
+                g.drawString(font, font.plainSubstrByWidth(file, rightW - 88),
+                        rightX + 80, edY() + 2, VanillaUIHelper.TEXT_AQUA, false);
+                if (!transformFile.isBlank() && font.width(file) > rightW - 88
+                        && isOver(mouseX, mouseY, rightX + 80, edY() - 2, rightW - 88, 12)) {
+                    multilineTooltip(g, file, mouseX, mouseY);
+                }
+                drawSmall(g, Component.translatable("wh_npcs.ui.actions.tf_pick").getString(),
+                        rightX, edY() + 18, 150, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                int cy = edY() + 46;
+                boolean eqHover = isOver(mouseX, mouseY, rightX, cy, 200, 12);
+                VanillaUIHelper.drawButton(g, rightX, cy, 12, 12, eqHover);
+                if (transformEquipment) {
+                    VanillaUIHelper.drawCheck(g, rightX + 1, cy + 2, VanillaUIHelper.TEXT_GREEN);
+                }
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.tf_equipment").getString(),
+                        rightX + 18, cy + 2,
+                        transformEquipment ? VanillaUIHelper.TEXT_WHITE : VanillaUIHelper.TEXT_DARK_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.tf_note1").getString(),
+                        rightX, edY() + 68, VanillaUIHelper.TEXT_WHITE, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.tf_note2").getString(),
+                        rightX, edY() + 80, VanillaUIHelper.TEXT_WHITE, false);
+            }
+            case "attack_player" -> {
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.atk_caption").getString(),
+                        rightX, edY() + 2, VanillaUIHelper.TEXT_GRAY, false);
+                int cy = edY() + 20;
+                boolean alHover = isOver(mouseX, mouseY, rightX, cy, 200, 12);
+                VanillaUIHelper.drawButton(g, rightX, cy, 12, 12, alHover);
+                if (attackAllies) {
+                    VanillaUIHelper.drawCheck(g, rightX + 1, cy + 2, VanillaUIHelper.TEXT_GREEN);
+                }
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.atk_allies").getString(),
+                        rightX + 18, cy + 2,
+                        attackAllies ? VanillaUIHelper.TEXT_WHITE : VanillaUIHelper.TEXT_DARK_GRAY, false);
+                // вторая галочка — атаковать всех игроков в радиусе от инициатора
+                int ay = edY() + 36;
+                boolean apHover = isOver(mouseX, mouseY, rightX, ay, 200, 12);
+                VanillaUIHelper.drawButton(g, rightX, ay, 12, 12, apHover);
+                if (atkAllPlayers) {
+                    VanillaUIHelper.drawCheck(g, rightX + 1, ay + 2, VanillaUIHelper.TEXT_GREEN);
+                }
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.atk_all").getString(),
+                        rightX + 18, ay + 2,
+                        atkAllPlayers ? VanillaUIHelper.TEXT_WHITE : VanillaUIHelper.TEXT_DARK_GRAY, false);
+                if (apHover) {
+                    multilineTooltip(g, Component.translatable("wh_npcs.ui.actions.atk_all_tip").getString(),
+                            mouseX, mouseY);
+                }
+                if (attackAllies || atkAllPlayers) {
+                    g.drawString(font, Component.translatable("wh_npcs.ui.actions.atk_radius").getString(),
+                            rightX + 18, edY() + 58, VanillaUIHelper.TEXT_GRAY, false);
+                    g.drawString(font, Component.translatable("wh_npcs.ui.actions.atk_radius_unit").getString(),
+                            rightX + 132, edY() + 58, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                }
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.atk_note1").getString(),
+                        rightX, edY() + 80, VanillaUIHelper.TEXT_WHITE, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.atk_note2").getString(),
+                        rightX, edY() + 92, VanillaUIHelper.TEXT_WHITE, false);
+            }
+            case "edit_profile" -> {
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.ep_name").getString(),
+                        rightX, edY() + 6, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.ep_title").getString(),
+                        rightX, edY() + 28, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.ep_skin").getString(),
+                        rightX, edY() + 50, VanillaUIHelper.TEXT_GRAY, false);
+                String skin = epSkin.isBlank()
+                        ? Component.translatable("wh_npcs.ui.actions.keep_value").getString() : epSkin;
+                g.drawString(font, font.plainSubstrByWidth(skin, rightW - 160),
+                        rightX + 60, edY() + 50, VanillaUIHelper.TEXT_AQUA, false);
+                drawSmall(g, Component.translatable("wh_npcs.ui.actions.ep_pick_skin").getString(),
+                        rightX + rightW - 90, edY() + 46, 82, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.ep_faction").getString(),
+                        rightX, edY() + 74, VanillaUIHelper.TEXT_GRAY, false);
+                String fac = epFaction.isBlank()
+                        ? Component.translatable("wh_npcs.ui.actions.keep_value").getString() : epFaction;
+                drawSmall(g, fac, rightX + 60, edY() + 68, 168, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                if (epFactionTip != null && isOver(mouseX, mouseY, rightX + 60, edY() + 68, 168, 18)) {
+                    multilineTooltip(g, epFactionTip, mouseX, mouseY);
+                }
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.ep_note").getString(),
+                        rightX, edY() + 96, VanillaUIHelper.TEXT_WHITE, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.ep_style_note").getString(),
+                        rightX, edY() + 108, VanillaUIHelper.TEXT_WHITE, false);
+            }
+            case "combat_stats" -> {
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.cs_preset").getString(),
+                        rightX, edY() + 7, VanillaUIHelper.TEXT_GRAY, false);
+                drawSmall(g, presetLabel(csPreset), rightX + 60, edY() + 2, 130,
+                        mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                int cy = edY() + 26;
+                boolean tgHover = isOver(mouseX, mouseY, rightX, cy, 200, 12);
+                VanillaUIHelper.drawButton(g, rightX, cy, 12, 12, tgHover);
+                if (csTargetsEnabled) {
+                    VanillaUIHelper.drawCheck(g, rightX + 1, cy + 2, VanillaUIHelper.TEXT_GREEN);
+                }
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.cs_targets").getString(),
+                        rightX + 18, cy + 2,
+                        csTargetsEnabled ? VanillaUIHelper.TEXT_WHITE : VanillaUIHelper.TEXT_DARK_GRAY, false);
+                if (tgHover) {
+                    multilineTooltip(g, Component.translatable("wh_npcs.ui.actions.cs_targets_tip").getString(),
+                            mouseX, mouseY);
+                }
+                if (csTargetsEnabled) {
+                    // 2 колонки «кого атаковать» — как в CombatPresetScreen
+                    for (int i = 0; i < CS_TARGET_IDS.length; i++) {
+                        int cx = rightX + 8 + (i % 2) * 150;
+                        int ty = edY() + 42 + (i / 2) * 14;
+                        boolean h = isOver(mouseX, mouseY, cx, ty, 140, 12);
+                        VanillaUIHelper.drawButton(g, cx, ty, 12, 12, h);
+                        if (csTargets[i]) {
+                            VanillaUIHelper.drawCheck(g, cx + 1, ty + 2, VanillaUIHelper.TEXT_GREEN);
+                        }
+                        g.drawString(font, Component.translatable(
+                                        "wh_npcs.ui.combat_preset.agg." + CS_TARGET_IDS[i]).getString(),
+                                cx + 16, ty + 2,
+                                csTargets[i] ? VanillaUIHelper.TEXT_WHITE : VanillaUIHelper.TEXT_DARK_GRAY, false);
+                    }
+                }
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.cs_hp").getString(),
+                        rightX, edY() + 92, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.cs_damage").getString(),
+                        rightX + 115, edY() + 92, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.cs_armor").getString(),
+                        rightX + 238, edY() + 92, VanillaUIHelper.TEXT_GRAY, false);
+                int hy = edY() + 112;
+                boolean healHover = isOver(mouseX, mouseY, rightX, hy, 200, 12);
+                VanillaUIHelper.drawButton(g, rightX, hy, 12, 12, healHover);
+                if (csHeal) {
+                    VanillaUIHelper.drawCheck(g, rightX + 1, hy + 2, VanillaUIHelper.TEXT_GREEN);
+                }
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.cs_heal").getString(),
+                        rightX + 18, hy + 2,
+                        csHeal ? VanillaUIHelper.TEXT_WHITE : VanillaUIHelper.TEXT_DARK_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.cs_note").getString(),
+                        rightX, edY() + 132, VanillaUIHelper.TEXT_WHITE, false);
             }
             default -> g.drawString(font,
                     Component.translatable("wh_npcs.ui.actions.json_only", action.type()).getString(),
@@ -1163,6 +1539,12 @@ public class ActionsEditorScreen extends ScaledScreen {
         }
         if (button == 0) {
             if (scrollbars.click(mouseX, mouseY)) {
+                return true;
+            }
+            // плавающий тулбар RichTextEditor рисуется поверх соседних полей —
+            // отдаём ему клик раньше остальных зон (как в DialogueEditorScreen)
+            if (getFocused() instanceof com.withouthonor.npcs.client.gui.RichTextEditor rte
+                    && rte.clickToolbar(mouseX, mouseY)) {
                 return true;
             }
             for (var s : scrubs) {
@@ -1414,6 +1796,114 @@ public class ActionsEditorScreen extends ScaledScreen {
                     }
                 }
             }
+            case "transform" -> {
+                if (rightClick) {
+                    return false;
+                }
+                if (isOver(mouseX, mouseY, rightX, edY() + 18, 150, 18)) {
+                    writeBack();
+                    int idx = selected;
+                    // одноразовый колбэк: RequestList → openImport откроет пикер в режиме выбора
+                    com.withouthonor.npcs.client.ClientNetHandlers.filePickCallback = name -> {
+                        transformFile = name;
+                        if (idx >= 0 && idx < actions.size()) {
+                            actions.set(idx, new Actions.Transform(name, transformEquipment));
+                        }
+                    };
+                    com.withouthonor.npcs.network.NetworkHandler.sendToServer(
+                            new com.withouthonor.npcs.network.ProfileSharePackets.RequestList());
+                    return true;
+                }
+                if (isOver(mouseX, mouseY, rightX, edY() + 46, 200, 12)) {
+                    transformEquipment = !transformEquipment;
+                    writeBack();
+                    return true;
+                }
+            }
+            case "attack_player" -> {
+                if (!rightClick && isOver(mouseX, mouseY, rightX, edY() + 20, 200, 12)) {
+                    attackAllies = !attackAllies;
+                    writeBack();
+                    init(minecraft, width, height);
+                    return true;
+                }
+                if (!rightClick && isOver(mouseX, mouseY, rightX, edY() + 36, 200, 12)) {
+                    atkAllPlayers = !atkAllPlayers;
+                    writeBack();
+                    init(minecraft, width, height);
+                    return true;
+                }
+            }
+            case "edit_profile" -> {
+                if (!rightClick && isOver(mouseX, mouseY, rightX + rightW - 90, edY() + 46, 82, 18)) {
+                    writeBack();
+                    int idx = selected;
+                    if (minecraft != null) {
+                        minecraft.setScreen(new SkinLibraryScreen(this, epSkin, spec -> {
+                            epSkin = spec == null ? "" : spec;
+                            if (idx >= 0 && idx < actions.size()
+                                    && actions.get(idx) instanceof Actions.EditProfile ep) {
+                                actions.set(idx, new Actions.EditProfile(
+                                        ep.name(), ep.title(), epSkin, ep.faction()));
+                            }
+                        }));
+                    }
+                    return true;
+                }
+                if (isOver(mouseX, mouseY, rightX + 60, edY() + 68, 168, 18)) {
+                    var all = ClientFactions.all();
+                    if (rightClick) {
+                        epFaction = "";
+                    } else if (!all.isEmpty()) {
+                        int cur = -1;
+                        for (int i = 0; i < all.size(); i++) {
+                            if (all.get(i).id().equals(epFaction)) {
+                                cur = i;
+                            }
+                        }
+                        epFaction = cur + 1 >= all.size() ? "" : all.get(cur + 1).id();
+                    }
+                    writeBack();
+                    return true;
+                }
+            }
+            case "combat_stats" -> {
+                if (rightClick) {
+                    return false;
+                }
+                if (isOver(mouseX, mouseY, rightX + 60, edY() + 2, 130, 18)) {
+                    int cur = 0;
+                    for (int i = 0; i < CS_PRESET_IDS.length; i++) {
+                        if (CS_PRESET_IDS[i].equals(csPreset)) {
+                            cur = i;
+                        }
+                    }
+                    csPreset = CS_PRESET_IDS[(cur + 1) % CS_PRESET_IDS.length];
+                    writeBack();
+                    return true;
+                }
+                if (isOver(mouseX, mouseY, rightX, edY() + 26, 200, 12)) {
+                    csTargetsEnabled = !csTargetsEnabled;
+                    writeBack();
+                    return true;
+                }
+                if (csTargetsEnabled) {
+                    for (int i = 0; i < CS_TARGET_IDS.length; i++) {
+                        int cx = rightX + 8 + (i % 2) * 150;
+                        int ty = edY() + 42 + (i / 2) * 14;
+                        if (isOver(mouseX, mouseY, cx, ty, 140, 12)) {
+                            csTargets[i] = !csTargets[i];
+                            writeBack();
+                            return true;
+                        }
+                    }
+                }
+                if (isOver(mouseX, mouseY, rightX, edY() + 112, 200, 12)) {
+                    csHeal = !csHeal;
+                    writeBack();
+                    return true;
+                }
+            }
             default -> {
             }
         }
@@ -1432,6 +1922,9 @@ public class ActionsEditorScreen extends ScaledScreen {
     @Override
     public void onClose() {
         writeBack();
+        // Ожидающий колбэк выбора файла не должен пережить экран: иначе следующий
+        // ListResult любого другого потока (импорт/спавн) уйдёт в мёртвый экран.
+        com.withouthonor.npcs.client.ClientNetHandlers.filePickCallback = null;
         if (minecraft != null) {
             minecraft.setScreen(parent);
         }

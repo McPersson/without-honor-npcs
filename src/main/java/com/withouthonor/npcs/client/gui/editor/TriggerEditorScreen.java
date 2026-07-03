@@ -15,11 +15,12 @@ import net.minecraft.network.chat.Component;
 
 import javax.annotation.Nullable;
 import java.util.List;
+import java.util.UUID;
 
 public class TriggerEditorScreen extends ScaledScreen {
 
     private static final int WIN_W = 280;
-    private static final int WIN_H = 196;
+    private static final int WIN_H = 220;
 
     private final BlockPos pos;
     private boolean once;
@@ -28,12 +29,17 @@ public class TriggerEditorScreen extends ScaledScreen {
     private final boolean viaHelper;
     @Nullable
     private Direction enterDir;
+    // привязанный NPC — цель действий триггера («Преображение», «Атаковать» и т.п.)
+    @Nullable
+    private UUID targetNpc;
+    private String targetNpcName;
 
     private int winX, winY, winW, winH;
 
     private TriggerEditorScreen(BlockPos pos, boolean once, List<DialogueAction> actions,
                                 List<DialogueCondition> conditions, boolean viaHelper,
-                                @Nullable Direction enterDir) {
+                                @Nullable Direction enterDir,
+                                @Nullable UUID targetNpc, String targetNpcName) {
         super(Component.translatable("wh_npcs.ui.trigger_edit.title"));
         this.pos = pos;
         this.once = once;
@@ -41,14 +47,17 @@ public class TriggerEditorScreen extends ScaledScreen {
         this.conditions = conditions;
         this.viaHelper = viaHelper;
         this.enterDir = enterDir;
+        this.targetNpc = targetNpc;
+        this.targetNpcName = targetNpcName == null ? "" : targetNpcName;
     }
 
     public static void open(BlockPos pos, boolean once, String actionsJson, String conditionsJson,
-                            boolean viaHelper, byte enterDir) {
+                            boolean viaHelper, byte enterDir,
+                            @Nullable UUID targetNpc, String targetNpcName) {
         Minecraft.getInstance().setScreen(new TriggerEditorScreen(pos, once,
                 TriggerBlockEntity.actionsFromJson(actionsJson),
                 TriggerBlockEntity.conditionsFromJson(conditionsJson), viaHelper,
-                TriggerBlockEntity.dirFromByte(enterDir)));
+                TriggerBlockEntity.dirFromByte(enterDir), targetNpc, targetNpcName));
     }
 
     @Override
@@ -89,8 +98,20 @@ public class TriggerEditorScreen extends ScaledScreen {
         return winY + 120;
     }
 
+    private int npcY() {
+        return winY + 144;
+    }
+
     private int footY() {
         return winY + winH - 26;
+    }
+
+    private int npcPickX() {
+        return winX + winW - 90;
+    }
+
+    private int npcClearX() {
+        return npcPickX() - 22;
     }
 
     @Override
@@ -126,6 +147,26 @@ public class TriggerEditorScreen extends ScaledScreen {
                 winX + 10, actY(), winW - 20, isOver(mouseX, mouseY, winX + 10, actY(), winW - 20, 18),
                 VanillaUIHelper.TEXT_AQUA);
 
+        // строка привязки NPC: подпись + текущее имя + «Выбрать…» и мини-«✕» для сброса
+        g.drawString(font, Component.translatable("wh_npcs.ui.trigger_edit.npc_label").getString(),
+                winX + 10, npcY() + 5, VanillaUIHelper.TEXT_GRAY, false);
+        String npcShown = targetNpc != null
+                ? "§b" + targetNpcName
+                : Component.translatable("wh_npcs.ui.trigger_edit.npc_none").getString();
+        int nameW = npcClearX() - (winX + 45) - 6;
+        g.drawString(font, font.plainSubstrByWidth(npcShown, nameW), winX + 45, npcY() + 5,
+                targetNpc != null ? VanillaUIHelper.TEXT_AQUA : VanillaUIHelper.TEXT_DARK_GRAY, false);
+        if (isOver(mouseX, mouseY, winX + 10, npcY(), nameW + 35, 18)) {
+            npcTooltip(g);
+        }
+        if (targetNpc != null) {
+            VanillaUIHelper.drawSmallButton(g, font, "✕", npcClearX(), npcY(), 18,
+                    isOver(mouseX, mouseY, npcClearX(), npcY(), 18, 18), VanillaUIHelper.TEXT_RED);
+        }
+        VanillaUIHelper.drawSmallButton(g, font, Component.translatable("wh_npcs.ui.trigger_edit.npc_pick").getString(),
+                npcPickX(), npcY(), 80, isOver(mouseX, mouseY, npcPickX(), npcY(), 80, 18),
+                VanillaUIHelper.TEXT_AQUA);
+
         VanillaUIHelper.drawSmallButton(g, font, Component.translatable("wh_npcs.ui.common.save").getString(), winX + 10, footY(), 100,
                 isOver(mouseX, mouseY, winX + 10, footY(), 100, 18), VanillaUIHelper.TEXT_GREEN);
         VanillaUIHelper.drawSmallButton(g, font, Component.translatable("wh_npcs.ui.common.close").getString(), winX + winW - 80, footY(), 70,
@@ -151,11 +192,25 @@ public class TriggerEditorScreen extends ScaledScreen {
                 ActionsEditorScreen.open(this, actions);
                 return true;
             }
+            if (targetNpc != null && isOver(mouseX, mouseY, npcClearX(), npcY(), 18, 18)) {
+                targetNpc = null;
+                targetNpcName = "";
+                return true;
+            }
+            if (isOver(mouseX, mouseY, npcPickX(), npcY(), 80, 18)) {
+                // одноразовый колбэк: Request → openNpcPick откроет пикер поверх этого экрана
+                com.withouthonor.npcs.client.ClientNetHandlers.npcPickCallback = entry -> {
+                    targetNpc = entry.uuid();
+                    targetNpcName = entry.name();
+                };
+                NetworkHandler.sendToServer(new com.withouthonor.npcs.network.NpcListPackets.Request());
+                return true;
+            }
             if (isOver(mouseX, mouseY, winX + 10, footY(), 100, 18)) {
                 NetworkHandler.sendToServer(new TriggerSavePacket(pos, once,
                         TriggerBlockEntity.actionsToJson(actions),
                         TriggerBlockEntity.conditionsToJson(conditions),
-                        TriggerBlockEntity.dirToByte(enterDir)));
+                        TriggerBlockEntity.dirToByte(enterDir), targetNpc));
                 onClose();
                 return true;
             }
@@ -193,8 +248,19 @@ public class TriggerEditorScreen extends ScaledScreen {
         };
     }
 
+    private void npcTooltip(GuiGraphics g) {
+        java.util.List<Component> lines = new java.util.ArrayList<>();
+        for (String line : Component.translatable("wh_npcs.ui.trigger_edit.npc_tip").getString().split("\n")) {
+            lines.add(Component.literal(line));
+        }
+        queueTooltip(lines);
+    }
+
     @Override
     public void onClose() {
+        // Ожидающий колбэк выбора NPC не должен пережить экран: иначе следующий
+        // пришедший список откроет пикер в мёртвый экран (как с filePickCallback).
+        com.withouthonor.npcs.client.ClientNetHandlers.npcPickCallback = null;
         if (minecraft != null) {
             minecraft.setScreen(null);
         }

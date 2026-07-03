@@ -6,6 +6,8 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
 
+import javax.annotation.Nullable;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 public class TriggerSavePacket {
@@ -15,14 +17,17 @@ public class TriggerSavePacket {
     private final String actionsJson;
     private final String conditionsJson;
     private final byte enterDir;
+    @Nullable
+    private final UUID targetNpc;
 
     public TriggerSavePacket(BlockPos pos, boolean once, String actionsJson, String conditionsJson,
-                             byte enterDir) {
+                             byte enterDir, @Nullable UUID targetNpc) {
         this.pos = pos;
         this.once = once;
         this.actionsJson = actionsJson;
         this.conditionsJson = conditionsJson;
         this.enterDir = enterDir;
+        this.targetNpc = targetNpc;
     }
 
     public static void encode(TriggerSavePacket p, FriendlyByteBuf buf) {
@@ -31,11 +36,20 @@ public class TriggerSavePacket {
         buf.writeUtf(p.actionsJson, 32767);
         buf.writeUtf(p.conditionsJson, 32767);
         buf.writeByte(p.enterDir);
+        buf.writeBoolean(p.targetNpc != null);
+        if (p.targetNpc != null) {
+            buf.writeUUID(p.targetNpc);
+        }
     }
 
     public static TriggerSavePacket decode(FriendlyByteBuf buf) {
-        return new TriggerSavePacket(buf.readBlockPos(), buf.readBoolean(),
-                buf.readUtf(32767), buf.readUtf(32767), buf.readByte());
+        BlockPos pos = buf.readBlockPos();
+        boolean once = buf.readBoolean();
+        String actionsJson = buf.readUtf(32767);
+        String conditionsJson = buf.readUtf(32767);
+        byte enterDir = buf.readByte();
+        UUID targetNpc = buf.readBoolean() ? buf.readUUID() : null;
+        return new TriggerSavePacket(pos, once, actionsJson, conditionsJson, enterDir, targetNpc);
     }
 
     public static void handle(TriggerSavePacket p, Supplier<NetworkEvent.Context> ctx) {
@@ -46,7 +60,7 @@ public class TriggerSavePacket {
                 return;
             }
             if (sp.level().getBlockEntity(p.pos) instanceof TriggerBlockEntity be) {
-                be.apply(p.actionsJson, p.conditionsJson, p.once, p.enterDir);
+                be.apply(p.actionsJson, p.conditionsJson, p.once, p.enterDir, p.targetNpc);
             }
         });
         c.setPacketHandled(true);

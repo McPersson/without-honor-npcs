@@ -741,6 +741,320 @@ public final class Actions {
         }
     }
 
+    public record Transform(String file, boolean equipment) implements DialogueAction {
+
+        @Override
+        public String type() {
+            return "transform";
+        }
+
+        @Override
+        public void execute(DialogueCondition.Context ctx) {
+            com.withouthonor.npcs.common.entity.CompanionEntity npc = ctx.npc();
+            if (npc == null || npc.getProfileId() == null || file.isBlank()) {
+                return;
+            }
+            net.minecraft.server.MinecraftServer server = ctx.player().server;
+            if (server == null) {
+                return;
+            }
+            com.withouthonor.npcs.network.ProfileSharePackets.transformFromExport(
+                    server, npc, file, equipment);
+        }
+
+        public static Transform fromJson(JsonObject json) {
+            return new Transform(
+                    json.has("file") ? json.get("file").getAsString() : "",
+                    json.has("equipment") && json.get("equipment").getAsBoolean());
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("type", type());
+            json.addProperty("file", file);
+            if (equipment) {
+                json.addProperty("equipment", true);
+            }
+            return json;
+        }
+    }
+
+    public record AttackPlayer(boolean allies, int alliesRadius, boolean allPlayers) implements DialogueAction {
+
+        @Override
+        public String type() {
+            return "attack_player";
+        }
+
+        @Override
+        public void execute(DialogueCondition.Context ctx) {
+            com.withouthonor.npcs.common.entity.CompanionEntity npc = ctx.npc();
+            if (npc == null || !npc.isAlive()) {
+                return;
+            }
+            ServerPlayer player = ctx.player();
+            if (npc.getProfileId() != null) {
+                var profile = com.withouthonor.npcs.common.storage.ProfileManager.get().get(npc.getProfileId());
+                if (profile != null && "passive".equals(profile.getCombatPreset())) {
+                    // Мирный пресет не имеет боевых целей — target взводится впустую.
+                    WHCompanions.LOGGER.warn(
+                            "attack_player: NPC '{}' has passive combat preset, attack will not start"
+                                    + " (change preset via combat_stats/transform first)", npc.getName().getString());
+                }
+            }
+            // Радиус общий: и для поиска игроков (all_players), и для созыва союзников.
+            int radius = Math.max(4, Math.min(48, alliesRadius));
+            List<ServerPlayer> targets = new ArrayList<>();
+            if (allPlayers) {
+                for (ServerPlayer sp : player.serverLevel().getEntitiesOfClass(
+                        ServerPlayer.class, player.getBoundingBox().inflate(radius))) {
+                    if (sp.isAlive() && !sp.isCreative() && !sp.isSpectator()) {
+                        targets.add(sp);
+                    }
+                }
+            }
+            if (!targets.contains(player) && player.isAlive() && !player.isCreative() && !player.isSpectator()) {
+                targets.add(player);
+            }
+            if (targets.isEmpty()) {
+                // Атаковать некого (креатив/наблюдатель) — не взводим target впустую.
+                return;
+            }
+            // setTarget сам поднимет setAggressive(true) в переопределении CompanionEntity.
+            npc.setTarget(nearestTo(npc, targets));
+            if (!allies) {
+                return;
+            }
+            String faction = factionOf(npc);
+            if (faction == null || faction.isBlank()) {
+                return;
+            }
+            var box = npc.getBoundingBox().inflate(radius);
+            for (var ally : npc.level().getEntitiesOfClass(
+                    com.withouthonor.npcs.common.entity.CompanionEntity.class, box)) {
+                if (ally == npc || !ally.isAlive() || ally.getTarget() != null) {
+                    continue;
+                }
+                if (faction.equals(factionOf(ally))) {
+                    ally.setTarget(nearestTo(ally, targets));
+                }
+            }
+        }
+
+        private static ServerPlayer nearestTo(com.withouthonor.npcs.common.entity.CompanionEntity npc,
+                                              List<ServerPlayer> targets) {
+            ServerPlayer best = targets.get(0);
+            double bestDist = npc.distanceToSqr(best);
+            for (int i = 1; i < targets.size(); i++) {
+                double d = npc.distanceToSqr(targets.get(i));
+                if (d < bestDist) {
+                    bestDist = d;
+                    best = targets.get(i);
+                }
+            }
+            return best;
+        }
+
+        @Nullable
+        private static String factionOf(com.withouthonor.npcs.common.entity.CompanionEntity npc) {
+            if (npc.getProfileId() == null) {
+                return null;
+            }
+            var profile = com.withouthonor.npcs.common.storage.ProfileManager.get().get(npc.getProfileId());
+            return profile == null ? null : profile.getFaction();
+        }
+
+        public static AttackPlayer fromJson(JsonObject json) {
+            return new AttackPlayer(
+                    json.has("allies") && json.get("allies").getAsBoolean(),
+                    json.has("allies_radius") ? json.get("allies_radius").getAsInt() : 16,
+                    json.has("all_players") && json.get("all_players").getAsBoolean());
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("type", type());
+            if (allies) {
+                json.addProperty("allies", true);
+            }
+            if (allPlayers) {
+                json.addProperty("all_players", true);
+            }
+            if (allies || allPlayers) {
+                // Радиус общий: поиск игроков и созыв союзников.
+                json.addProperty("allies_radius", alliesRadius);
+            }
+            return json;
+        }
+    }
+
+    public record EditProfile(String name, String title, String skin, String faction)
+            implements DialogueAction {
+
+        @Override
+        public String type() {
+            return "edit_profile";
+        }
+
+        @Override
+        public void execute(DialogueCondition.Context ctx) {
+            com.withouthonor.npcs.common.entity.CompanionEntity npc = ctx.npc();
+            if (npc == null || npc.getProfileId() == null) {
+                return;
+            }
+            var profile = com.withouthonor.npcs.common.storage.ProfileManager.get().get(npc.getProfileId());
+            if (profile == null) {
+                return;
+            }
+            // Пустая строка = «не менять»; имя может содержать §-коды — храним как есть.
+            boolean changed = false;
+            if (!name.isBlank()) {
+                profile.setName(name);
+                changed = true;
+            }
+            if (!title.isBlank()) {
+                profile.setTitle(title);
+                changed = true;
+            }
+            if (!skin.isBlank()) {
+                profile.setSkinPlayerName(skin);
+                changed = true;
+            }
+            if (!faction.isBlank()) {
+                profile.setFaction(faction);
+                changed = true;
+            }
+            if (changed) {
+                com.withouthonor.npcs.common.storage.ProfileManager.get().save(profile);
+                com.withouthonor.npcs.common.profile.ProfileSync
+                        .applyToLoadedEntities(ctx.player().server, profile);
+            }
+        }
+
+        public static EditProfile fromJson(JsonObject json) {
+            return new EditProfile(
+                    json.has("name") ? json.get("name").getAsString() : "",
+                    json.has("title") ? json.get("title").getAsString() : "",
+                    json.has("skin") ? json.get("skin").getAsString() : "",
+                    json.has("faction") ? json.get("faction").getAsString() : "");
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("type", type());
+            if (!name.isBlank()) {
+                json.addProperty("name", name);
+            }
+            if (!title.isBlank()) {
+                json.addProperty("title", title);
+            }
+            if (!skin.isBlank()) {
+                json.addProperty("skin", skin);
+            }
+            if (!faction.isBlank()) {
+                json.addProperty("faction", faction);
+            }
+            return json;
+        }
+    }
+
+    public record CombatStats(String preset, String aggroTargets, @Nullable Float hp,
+                              @Nullable Float damage, @Nullable Float armor, boolean heal)
+            implements DialogueAction {
+
+        private static final Set<String> PRESETS = Set.of("passive", "melee", "shield", "bow", "potion");
+
+        @Override
+        public String type() {
+            return "combat_stats";
+        }
+
+        @Override
+        public void execute(DialogueCondition.Context ctx) {
+            com.withouthonor.npcs.common.entity.CompanionEntity npc = ctx.npc();
+            if (npc == null || npc.getProfileId() == null) {
+                return;
+            }
+            var profile = com.withouthonor.npcs.common.storage.ProfileManager.get().get(npc.getProfileId());
+            if (profile == null) {
+                return;
+            }
+            // Пустой пресет/цели и null-числа = «не менять»; клампы живут в сеттерах профиля.
+            boolean changed = false;
+            if (!preset.isBlank()) {
+                if (PRESETS.contains(preset)) {
+                    profile.setCombatPreset(preset);
+                    changed = true;
+                } else {
+                    WHCompanions.LOGGER.warn("combat_stats: unknown preset '{}'", preset);
+                }
+            }
+            if (!aggroTargets.isBlank()) {
+                profile.setAggressorTargets(aggroTargets);
+                changed = true;
+            }
+            if (hp != null) {
+                profile.setMaxHealth(hp);
+                changed = true;
+            }
+            if (damage != null) {
+                profile.setAttackDamage(damage);
+                changed = true;
+            }
+            if (armor != null) {
+                profile.setArmor(armor);
+                changed = true;
+            }
+            if (changed) {
+                com.withouthonor.npcs.common.storage.ProfileManager.get().save(profile);
+                // applyToLoadedEntities → applyCombatProfile уже применит новый MAX_HEALTH к сущности.
+                com.withouthonor.npcs.common.profile.ProfileSync
+                        .applyToLoadedEntities(ctx.player().server, profile);
+            }
+            if (heal) {
+                npc.setHealth(npc.getMaxHealth());
+            }
+        }
+
+        public static CombatStats fromJson(JsonObject json) {
+            return new CombatStats(
+                    json.has("preset") ? json.get("preset").getAsString() : "",
+                    json.has("aggro_targets") ? json.get("aggro_targets").getAsString() : "",
+                    json.has("hp") ? json.get("hp").getAsFloat() : null,
+                    json.has("damage") ? json.get("damage").getAsFloat() : null,
+                    json.has("armor") ? json.get("armor").getAsFloat() : null,
+                    json.has("heal") && json.get("heal").getAsBoolean());
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("type", type());
+            if (!preset.isBlank()) {
+                json.addProperty("preset", preset);
+            }
+            if (!aggroTargets.isBlank()) {
+                json.addProperty("aggro_targets", aggroTargets);
+            }
+            if (hp != null) {
+                json.addProperty("hp", hp);
+            }
+            if (damage != null) {
+                json.addProperty("damage", damage);
+            }
+            if (armor != null) {
+                json.addProperty("armor", armor);
+            }
+            if (heal) {
+                json.addProperty("heal", true);
+            }
+            return json;
+        }
+    }
+
     public record FollowWait() implements DialogueAction {
 
         @Override

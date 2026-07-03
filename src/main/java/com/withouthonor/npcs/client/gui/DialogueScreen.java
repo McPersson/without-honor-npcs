@@ -142,6 +142,9 @@ public class DialogueScreen extends ScaledScreen {
     protected void init() {
         cachedLines = null;
         rebuildInputWidget();
+        if (findNpc() instanceof com.withouthonor.npcs.common.entity.CompanionEntity ce) {
+            ce.resetGuiPoseLerp();
+        }
     }
 
     @Override
@@ -394,8 +397,13 @@ public class DialogueScreen extends ScaledScreen {
             int feetY = py + ph - 12;
             int scale = (int) (ph / 2.6F);
             ScaledScreen.enableScissor(g, px + 2, py + 2, px + PORTRAIT_W - 2, py + ph - 2);
-            InventoryScreen.renderEntityInInventoryFollowsMouse(g, centerX, feetY, scale,
-                    centerX - mouseX, py + ph / 3F - mouseY, npc);
+            com.withouthonor.npcs.common.entity.CompanionEntity.GUI_POSE_CONTEXT = true;
+            try {
+                InventoryScreen.renderEntityInInventoryFollowsMouse(g, centerX, feetY, scale,
+                        centerX - mouseX, py + ph / 3F - mouseY, npc);
+            } finally {
+                com.withouthonor.npcs.common.entity.CompanionEntity.GUI_POSE_CONTEXT = false;
+            }
             g.disableScissor();
         }
     }

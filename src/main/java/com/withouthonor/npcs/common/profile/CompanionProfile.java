@@ -452,6 +452,11 @@ public class CompanionProfile {
         return aggressorTargets;
     }
 
+    public void setAggressorTargets(String aggressorTargets) {
+        // Нормализуем в тот же формат, что и fromJson: категории через запятую.
+        this.aggressorTargets = String.join(",", parseAggressorTargets(aggressorTargets));
+    }
+
     public boolean isBossbarEnabled() {
         return bossbarEnabled;
     }

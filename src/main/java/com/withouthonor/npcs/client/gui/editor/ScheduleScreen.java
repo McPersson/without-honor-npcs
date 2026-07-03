@@ -113,8 +113,8 @@ public class ScheduleScreen extends ScaledScreen {
             xBoxes.add(box(base + 46, y, 36, String.valueOf(e.x())));
             yBoxes.add(box(base + 86, y, 36, String.valueOf(e.y())));
             zBoxes.add(box(base + 126, y, 36, String.valueOf(e.z())));
+            // Радиус теперь = точность прибытия для всех поз, не только «Бродить».
             EditBox rad = box(base + COL_RADIUS, y, 30, String.valueOf(e.radius()));
-            rad.visible = isWander(e);
             radiusBoxes.add(rad);
         }
     }
@@ -164,16 +164,7 @@ public class ScheduleScreen extends ScaledScreen {
         g.drawString(font, "Y", base + 86, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
         g.drawString(font, "Z", base + 126, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
         g.drawString(font, Component.translatable("wh_npcs.ui.schedule.col.pose").getString(), base + COL_POSE, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
-        boolean anyWander = false;
-        for (ScheduleEntry e : rows) {
-            if (isWander(e)) {
-                anyWander = true;
-                break;
-            }
-        }
-        if (anyWander) {
-            g.drawString(font, Component.translatable("wh_npcs.ui.schedule.col.radius").getString(), base + COL_RADIUS, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
-        }
+        g.drawString(font, Component.translatable("wh_npcs.ui.schedule.col.radius").getString(), base + COL_RADIUS, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
         g.drawString(font, Component.translatable("wh_npcs.ui.schedule.col.emote").getString(), base + COL_EMOTE, hy, VanillaUIHelper.TEXT_DARK_GRAY, false);
 
         String tooltip = null;
@@ -223,6 +214,9 @@ public class ScheduleScreen extends ScaledScreen {
             if (isOver(mouseX, mouseY, base, y, 42, 16)) {
                 int min = parseHHMM(timeBoxes.get(i).getValue());
                 tooltip = Component.translatable("wh_npcs.ui.schedule.tip.time", hhmm(min), timeToTicks(min)).getString();
+            }
+            if (isOver(mouseX, mouseY, base + COL_RADIUS, y, 30, 16)) {
+                tooltip = Component.translatable("wh_npcs.ui.schedule.tip.radius").getString();
             }
         }
         if (rows.size() < MAX_ROWS) {
@@ -501,10 +495,6 @@ public class ScheduleScreen extends ScaledScreen {
         boolean hovered = isOver(mouseX, mouseY, x, y, w, 18);
         VanillaUIHelper.drawButton(g, x, y, w, 18, hovered);
         g.drawCenteredString(font, label, x + w / 2, y + 5, hovered ? VanillaUIHelper.TEXT_YELLOW : color);
-    }
-
-    private static boolean isWander(ScheduleEntry e) {
-        return !e.isCustomPose() && "wander".equals(e.pose());
     }
 
     private static String poseLabel(String pose) {

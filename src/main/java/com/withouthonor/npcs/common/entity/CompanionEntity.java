@@ -347,6 +347,12 @@ public class CompanionEntity extends PathfinderMob
 
     private final float[] renderedPose = new float[18];
     private boolean poseRenderInit;
+    // Отдельное состояние сглаживания позы для GUI-рендера (портрет диалога):
+    // мир и GUI рендерят одну сущность с разными углами головы — общий лерп-массив
+    // осциллировал между двумя целями (тряска + голова вбок). Клиент-only.
+    private final float[] renderedPoseGui = new float[18];
+    private boolean poseRenderInitGui;
+    public static boolean GUI_POSE_CONTEXT;
 
     private PoseJson.Pose cfgBasePose = new PoseJson.Pose();
     private float[] cfgBaseTransform = new float[]{0, 0, 0, 0, 0, 0, 1, 1, 1};
@@ -356,15 +362,25 @@ public class CompanionEntity extends PathfinderMob
     }
 
     public float[] renderedPose() {
-        return renderedPose;
+        return GUI_POSE_CONTEXT ? renderedPoseGui : renderedPose;
     }
 
     public boolean isPoseRenderInit() {
-        return poseRenderInit;
+        return GUI_POSE_CONTEXT ? poseRenderInitGui : poseRenderInit;
     }
 
     public void setPoseRenderInit(boolean v) {
-        this.poseRenderInit = v;
+        if (GUI_POSE_CONTEXT) {
+            this.poseRenderInitGui = v;
+        } else {
+            this.poseRenderInit = v;
+        }
+    }
+
+    /** Сброс GUI-сглаживания позы при открытии портрета — иначе лерп стартует
+     *  с устаревших углов прошлого диалога и голова «докручивается» на глазах. */
+    public void resetGuiPoseLerp() {
+        this.poseRenderInitGui = false;
     }
 
     public void setPoseClient(PoseJson.Pose pose) {
@@ -996,6 +1012,22 @@ public class CompanionEntity extends PathfinderMob
         tag.putBoolean("HideMainhand", isHideMainhand());
         tag.putBoolean("HideOffhand", isHideOffhand());
         tag.put("Arrow", getArrowItem().save(new CompoundTag()));
+        if (com.withouthonor.npcs.compat.Compat.curiosLoaded()) {
+            net.minecraft.nbt.ListTag curios = new net.minecraft.nbt.ListTag();
+            for (var e : com.withouthonor.npcs.compat.Compat.curios().getCurios(this)) {
+                if (e.stack().isEmpty()) {
+                    continue;
+                }
+                CompoundTag c = new CompoundTag();
+                c.putString("slot", e.slotType());
+                c.putInt("idx", e.index());
+                c.put("item", e.stack().save(new CompoundTag()));
+                curios.add(c);
+            }
+            if (!curios.isEmpty()) {
+                tag.put("Curios", curios);
+            }
+        }
         return tag;
     }
 
@@ -1016,6 +1048,20 @@ public class CompanionEntity extends PathfinderMob
         setArrowItem(tag.contains("Arrow")
                 ? net.minecraft.world.item.ItemStack.of(tag.getCompound("Arrow"))
                 : net.minecraft.world.item.ItemStack.EMPTY);
+        if (com.withouthonor.npcs.compat.Compat.curiosLoaded()) {
+            // Снапшот — полное состояние: нет секции Curios = слоты пустые.
+            com.withouthonor.npcs.compat.Compat.curios().resetCurios(this);
+            net.minecraft.nbt.ListTag curios = tag.getList("Curios", net.minecraft.nbt.Tag.TAG_COMPOUND);
+            for (int i = 0; i < curios.size(); i++) {
+                CompoundTag c = curios.getCompound(i);
+                net.minecraft.world.item.ItemStack stack =
+                        net.minecraft.world.item.ItemStack.of(c.getCompound("item"));
+                if (!stack.isEmpty()) {
+                    com.withouthonor.npcs.compat.Compat.curios()
+                            .setCurio(this, c.getString("slot"), c.getInt("idx"), stack);
+                }
+            }
+        }
     }
 
     @Override

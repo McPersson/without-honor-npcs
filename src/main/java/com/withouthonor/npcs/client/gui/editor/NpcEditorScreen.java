@@ -226,6 +226,10 @@ public class NpcEditorScreen extends ScaledScreen {
         hideArmor = npc != null && npc.isHideArmor();
         hideMainhand = npc != null && npc.isHideMainhand();
         hideOffhand = npc != null && npc.isHideOffhand();
+        // Ваниль-синк слотов приходит на тик позже EditorDataPacket (после импорта
+        // снаряжения) — перечитываем слоты чуть позже, иначе слепок пустой и
+        // «Сохранить» затрёт импортированные вещи.
+        equipRefreshTicks = npc != null ? 5 : 0;
         loadDropsFromJson();
         if (profileJson.has("entry_points")) {
             for (JsonElement e : profileJson.getAsJsonArray("entry_points")) {
@@ -614,6 +618,10 @@ public class NpcEditorScreen extends ScaledScreen {
         if (posePreviewNpc == null && minecraft != null && minecraft.level != null) {
             posePreviewNpc = com.withouthonor.npcs.common.registry.ModEntities.COMPANION.get()
                     .create(minecraft.level);
+            if (posePreviewNpc != null && npc != null) {
+                // Снаряжение на превью позы — чтобы было видно, как поза ляжет с бронёй/оружием.
+                posePreviewNpc.loadEquipmentSnapshot(npc.saveEquipmentSnapshot());
+            }
         }
         return posePreviewNpc;
     }
@@ -4100,7 +4108,8 @@ public class NpcEditorScreen extends ScaledScreen {
                     applyFieldsToJson();
                     flushFaction();
                     NetworkHandler.sendToServer(
-                            new com.withouthonor.npcs.network.ProfileSharePackets.Export(profileJson));
+                            new com.withouthonor.npcs.network.ProfileSharePackets.Export(
+                                    profileJson, npc.getId()));
                 });
                 return true;
             }
@@ -4254,6 +4263,24 @@ public class NpcEditorScreen extends ScaledScreen {
             npc.revertRenderTransformPreview();
         }
         super.onClose();
+    }
+
+    private int equipRefreshTicks;
+
+    @Override
+    public void tick() {
+        super.tick();
+        if (equipRefreshTicks > 0 && npc != null && --equipRefreshTicks == 0) {
+            var slots = com.withouthonor.npcs.network.SaveEquipmentPacket.SLOTS;
+            for (int i = 0; i < 6; i++) {
+                funcEquip[i] = npc.getFunctionalItem(slots[i]).copy();
+                cosmEquip[i] = npc.getCosmeticItem(slots[i]).copy();
+            }
+            arrowEquip = npc.getArrowItem().copy();
+            hideArmor = npc.isHideArmor();
+            hideMainhand = npc.isHideMainhand();
+            hideOffhand = npc.isHideOffhand();
+        }
     }
 
     private void save() {

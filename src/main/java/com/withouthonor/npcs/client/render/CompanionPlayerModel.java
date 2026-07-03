@@ -64,7 +64,10 @@ public class CompanionPlayerModel extends PlayerModel<CompanionEntity> {
             } else {
                 target = vanilla + pose;
             }
-            rendered[i] = init ? rendered[i] + (target - rendered[i]) * LERP : target;
+            // Кратчайшая дуга: без wrap'а скачок цели через ±180° лерпится
+            // «в длинную сторону» — видимая быстрая раскрутка части тела.
+            float delta = (float) Math.IEEEremainder(target - rendered[i], Math.PI * 2.0);
+            rendered[i] = init ? rendered[i] + delta * LERP : target;
             setAxis(part, i % 3, rendered[i]);
         }
         entity.setPoseRenderInit(true);

@@ -82,7 +82,8 @@ public class MemorionFeatherItem extends Item {
         }
         if (triggerPos != null && level.getBlockEntity(triggerPos) instanceof TriggerBlockEntity be) {
             NetworkHandler.sendToPlayer(new TriggerEditPacket(triggerPos, be.isOnce(),
-                    be.actionsJson(), be.conditionsJson(), viaHelper, be.enterDirByte()), sp);
+                    be.actionsJson(), be.conditionsJson(), viaHelper, be.enterDirByte(),
+                    be.getTargetNpc(), be.targetNpcName()), sp);
         } else {
             sp.displayClientMessage(Component.translatable("wh_npcs.msg.feather.helper_unbound"), true);
         }

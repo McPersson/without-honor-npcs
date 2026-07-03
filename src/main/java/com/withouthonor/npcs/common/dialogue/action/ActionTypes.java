@@ -34,6 +34,10 @@ public final class ActionTypes {
         register("stop_follow", Actions.StopFollow::fromJson);
         register("follow_wait", Actions.FollowWait::fromJson);
         register("effect", Actions.Effect::fromJson);
+        register("transform", Actions.Transform::fromJson);
+        register("attack_player", Actions.AttackPlayer::fromJson);
+        register("edit_profile", Actions.EditProfile::fromJson);
+        register("combat_stats", Actions.CombatStats::fromJson);
     }
 
     private ActionTypes() {

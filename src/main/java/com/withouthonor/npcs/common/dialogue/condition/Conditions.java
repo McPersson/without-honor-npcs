@@ -382,6 +382,47 @@ public final class Conditions {
         }
     }
 
+    public record NpcHealth(Integer minPct, Integer maxPct) implements DialogueCondition {
+
+        @Override
+        public String type() {
+            return "npc_health";
+        }
+
+        @Override
+        public boolean test(Context ctx) {
+            if (ctx.npc() == null) {
+                return false;
+            }
+            float max = ctx.npc().getMaxHealth();
+            if (max <= 0.0F) {
+                return false;
+            }
+            // Проценты включительно; null-граница не проверяется.
+            int pct = Math.round(ctx.npc().getHealth() / max * 100.0F);
+            return (minPct == null || pct >= minPct) && (maxPct == null || pct <= maxPct);
+        }
+
+        public static NpcHealth fromJson(JsonObject json) {
+            return new NpcHealth(
+                    json.has("min") ? json.get("min").getAsInt() : null,
+                    json.has("max") ? json.get("max").getAsInt() : null);
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("type", type());
+            if (minPct != null) {
+                json.addProperty("min", minPct);
+            }
+            if (maxPct != null) {
+                json.addProperty("max", maxPct);
+            }
+            return json;
+        }
+    }
+
     public record Inverted(DialogueCondition inner) implements DialogueCondition {
 
         @Override

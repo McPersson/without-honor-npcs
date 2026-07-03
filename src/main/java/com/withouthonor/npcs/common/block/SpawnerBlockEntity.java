@@ -213,6 +213,7 @@ public class SpawnerBlockEntity extends BlockEntity {
             npc.setProfileId(profile.getId());
             npc.setTransientProfile(true);
             npc.setCustomName(Component.literal(json.has("name") ? json.get("name").getAsString() : "NPC"));
+            com.withouthonor.npcs.network.ProfileSharePackets.applyEquipment(json, npc);
             level.addFreshEntity(npc);
             spawned.add(npc.getUUID());
             return true;

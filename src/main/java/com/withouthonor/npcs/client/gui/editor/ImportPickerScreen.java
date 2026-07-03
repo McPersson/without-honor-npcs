@@ -32,6 +32,9 @@ public class ImportPickerScreen extends ScaledScreen {
     private final int entityId;
 
     private final boolean spawnMode;
+    /** Режим «выбор файла»: клик по строке отдаёт имя в колбэк и возвращает родителя. */
+    @Nullable
+    private final java.util.function.Consumer<String> onPicked;
     private List<FileEntry> files;
     private final ScrollDrag scrollbars = new ScrollDrag();
 
@@ -63,6 +66,7 @@ public class ImportPickerScreen extends ScaledScreen {
         this.entityId = entityId;
         this.files = files;
         this.spawnMode = false;
+        this.onPicked = null;
     }
 
     public ImportPickerScreen(List<FileEntry> files) {
@@ -71,6 +75,17 @@ public class ImportPickerScreen extends ScaledScreen {
         this.entityId = -1;
         this.files = files;
         this.spawnMode = true;
+        this.onPicked = null;
+    }
+
+    public ImportPickerScreen(@Nullable Screen parent, List<FileEntry> files,
+                              java.util.function.Consumer<String> onPicked) {
+        super(Component.translatable("wh_npcs.ui.import.title_pick"));
+        this.parent = parent;
+        this.entityId = -1;
+        this.files = files;
+        this.spawnMode = false;
+        this.onPicked = onPicked;
     }
 
     public void acceptList(List<FileEntry> updated) {
@@ -142,7 +157,8 @@ public class ImportPickerScreen extends ScaledScreen {
     }
 
     private boolean clientTabs() {
-        return true;
+        // в режиме выбора файла источник только сервер — файл должен лежать в exports мира
+        return onPicked == null;
     }
 
     private int srcServerX() {
@@ -227,7 +243,8 @@ public class ImportPickerScreen extends ScaledScreen {
         scrollbars.beginFrame();
         VanillaUIHelper.drawWindow(g, winX, winY, winW, winH);
         g.fill(winX + 2, winY + 2, winX + winW - 2, winY + HEADER_H - 2, VanillaUIHelper.BG_HEADER);
-        g.drawString(font, (spawnMode ? Component.translatable("wh_npcs.ui.import.title_spawn")
+        g.drawString(font, (onPicked != null ? Component.translatable("wh_npcs.ui.import.title_pick")
+                        : spawnMode ? Component.translatable("wh_npcs.ui.import.title_spawn")
                         : Component.translatable("wh_npcs.ui.import.title")).getString(),
                 winX + PAD, winY + 7, VanillaUIHelper.TEXT_YELLOW, false);
 
@@ -302,7 +319,9 @@ public class ImportPickerScreen extends ScaledScreen {
             return;
         }
         ClientPrefs prefs = ClientPrefs.get();
-        boolean canDel = clientSource || canDelete();
+        // В режиме выбора файла (onPicked) правка/удаление скрыты: случайный rename
+        // сломал бы transform-действия, ссылающиеся на имя файла.
+        boolean canDel = (clientSource || canDelete()) && onPicked == null;
         int visible = (listH - 8) / ROW_H;
         scroll = Math.max(0, Math.min(scroll, Math.max(0, shown.size() - visible)));
         int y = listY + 4;
@@ -513,7 +532,7 @@ public class ImportPickerScreen extends ScaledScreen {
         int listX = winX + PAD;
         int listW = winW - 2 * PAD;
         List<FileEntry> shown = displayed();
-        boolean canDel = clientSource || canDelete();
+        boolean canDel = (clientSource || canDelete()) && onPicked == null;
         int visible = (listH - 8) / ROW_H;
         int y = listY + 4;
         for (int i = scroll; i < Math.min(shown.size(), scroll + visible); i++) {
@@ -534,6 +553,11 @@ public class ImportPickerScreen extends ScaledScreen {
                 }
                 if (canDel && isOver(mouseX, mouseY, delX(listX, listW), y + 3, 10, 10)) {
                     confirmDelete = f.name();
+                    return true;
+                }
+                if (onPicked != null) {
+                    onPicked.accept(f.name());
+                    onClose();
                     return true;
                 }
                 confirmImport = f.name();

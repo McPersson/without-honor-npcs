@@ -555,6 +555,18 @@ public class NetworkHandler {
                 .decoder(GlobalSchedulePackets.Action::decode)
                 .consumerMainThread(GlobalSchedulePackets.Action::handle)
                 .add();
+
+        CHANNEL.messageBuilder(NpcListPackets.Request.class, packetId++, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(NpcListPackets.Request::encode)
+                .decoder(NpcListPackets.Request::decode)
+                .consumerMainThread(NpcListPackets.Request::handle)
+                .add();
+
+        CHANNEL.messageBuilder(NpcListPackets.Result.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(NpcListPackets.Result::encode)
+                .decoder(NpcListPackets.Result::decode)
+                .consumerMainThread(NpcListPackets.Result::handle)
+                .add();
     }
 
     public static void sendToPlayer(Object packet, ServerPlayer player) {

@@ -68,9 +68,11 @@ public class ScheduleGoal extends Goal {
         double cx = target.getX() + 0.5;
         double cz = target.getZ() + 0.5;
 
-        int reach = "wander".equals(e.pose()) ? Math.max(2, e.radius()) : 2;
+        // Радиус записи = точность прибытия: 0 — ровно на блок, N — в радиусе N блоков.
+        int radius = Math.max(0, e.radius());
+        double reach = "wander".equals(e.pose()) ? Math.max(2, radius) : (radius == 0 ? 1.5 : radius);
         double distSq = npc.distanceToSqr(cx, target.getY(), cz);
-        boolean atPoint = distSq <= (double) (reach * reach);
+        boolean atPoint = distSq <= reach * reach;
         if (!atPoint) {
             resetPose();
             npc.setScheduleEmote("");
@@ -84,6 +86,13 @@ public class ScheduleGoal extends Goal {
                 navigation.moveTo(cx, target.getY(), cz, 1.0D);
             }
             return;
+        }
+        if (radius == 0 && !"wander".equals(e.pose()) && !npc.isSleeping()
+                && (Math.abs(npc.getX() - cx) > 0.01 || Math.abs(npc.getZ() - cz) > 0.01)) {
+            // Навигация не встаёт точно в центр — доводим микро-переносом.
+            // Только X/Z: Y не трогаем (ковры/плиты/кровать дают вечный цикл снапа).
+            navigation.stop();
+            npc.moveTo(cx, npc.getY(), cz, npc.getYRot(), npc.getXRot());
         }
         applyPose(e, target, cx, cz);
     }

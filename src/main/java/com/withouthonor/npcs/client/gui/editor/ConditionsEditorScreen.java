@@ -58,7 +58,9 @@ public class ConditionsEditorScreen extends ScaledScreen {
             new TypeInfo("time", "wh_npcs.ui.cond.type.time.label",
                     "wh_npcs.ui.cond.type.time.desc", "wh_npcs.ui.cond.type.time.detail"),
             new TypeInfo("player_state", "wh_npcs.ui.cond.type.player_state.label",
-                    "wh_npcs.ui.cond.type.player_state.desc", "wh_npcs.ui.cond.type.player_state.detail"));
+                    "wh_npcs.ui.cond.type.player_state.desc", "wh_npcs.ui.cond.type.player_state.detail"),
+            new TypeInfo("npc_health", "wh_npcs.ui.cond.type.npc_health.label",
+                    "wh_npcs.ui.cond.type.npc_health.desc", "wh_npcs.ui.cond.type.npc_health.detail"));
 
     private final Screen parent;
 
@@ -98,6 +100,8 @@ public class ConditionsEditorScreen extends ScaledScreen {
     private EditBox hpMaxBox;
     private EditBox foodMinBox;
     private EditBox foodMaxBox;
+    private EditBox nhMinBox;
+    private EditBox nhMaxBox;
     private String weatherState = "clear";
     private String effectMode = "off";
     @Nullable
@@ -367,6 +371,16 @@ public class ConditionsEditorScreen extends ScaledScreen {
                 scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(foodMaxBox, 0, 20, 1, 0.2F,
                         "", true, () -> setFocused(null)));
             }
+            case "npc_health" -> {
+                Conditions.NpcHealth nh = (Conditions.NpcHealth) condition;
+                // сдвиг вправо на 15px — слева от полей кнопки «−» скраба
+                nhMinBox = numField(rightX + 55, edY() + 14, nh.minPct());
+                nhMaxBox = numField(rightX + 159, edY() + 14, nh.maxPct());
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(nhMinBox, 0, 100, 5, 0.5F,
+                        "", true, () -> setFocused(null)));
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(nhMaxBox, 0, 100, 5, 0.5F,
+                        "", true, () -> setFocused(null)));
+            }
             default -> {
             }
         }
@@ -553,6 +567,8 @@ public class ConditionsEditorScreen extends ScaledScreen {
                 case "player_state" -> store(new Conditions.PlayerState(
                         parseOpt(hpMinBox), parseOpt(hpMaxBox), parseOpt(foodMinBox), parseOpt(foodMaxBox),
                         new ArrayList<>(draftEffects), effectMode));
+                case "npc_health" -> store(new Conditions.NpcHealth(
+                        clampPct(parseOpt(nhMinBox)), clampPct(parseOpt(nhMaxBox))));
                 default -> {
                 }
             }
@@ -571,6 +587,12 @@ public class ConditionsEditorScreen extends ScaledScreen {
         } catch (NumberFormatException e) {
             return def;
         }
+    }
+
+    /** Проценты 0..100 включительно; null-граница не проверяется. */
+    @Nullable
+    private static Integer clampPct(@Nullable Integer v) {
+        return v == null ? null : Math.max(0, Math.min(100, v));
     }
 
     private void addCondition(TypeInfo type) {
@@ -592,6 +614,7 @@ public class ConditionsEditorScreen extends ScaledScreen {
             case "time" -> new Conditions.Time(0, 12000);
             case "player_state" -> new Conditions.PlayerState(null, null, null, null,
                     new ArrayList<>(), "off");
+            case "npc_health" -> new Conditions.NpcHealth(null, 50);
             case "score" -> new Conditions.Score("objective", null, null);
             default -> new Conditions.Score("objective", null, null);
         };
@@ -746,6 +769,11 @@ public class ConditionsEditorScreen extends ScaledScreen {
         }
         if (condition instanceof Conditions.PlayerState) {
             return Component.translatable("wh_npcs.ui.conditions.sum_player_state").getString();
+        }
+        if (condition instanceof Conditions.NpcHealth nh) {
+            return Component.translatable("wh_npcs.ui.conditions.sum_npc_health",
+                    nh.minPct() != null ? nh.minPct() : 0,
+                    nh.maxPct() != null ? nh.maxPct() : 100).getString();
         }
         return condition.type();
     }
@@ -902,6 +930,18 @@ public class ConditionsEditorScreen extends ScaledScreen {
                 }
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.empty_bound").getString(),
                         rightX, edY() + 96, VanillaUIHelper.TEXT_DARK_GRAY, false);
+            }
+            case "npc_health" -> {
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.from").getString(),
+                        rightX + 16, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, "%", rightX + 111, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.to").getString(),
+                        rightX + 126, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, "%", rightX + 215, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.empty_bound").getString(),
+                        rightX, edY() + 40, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.npc_hp_note").getString(),
+                        rightX, edY() + 56, VanillaUIHelper.TEXT_WHITE, false);
             }
             default -> g.drawString(font,
                     Component.translatable("wh_npcs.ui.conditions.type_later", condition.type()).getString(),

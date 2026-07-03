@@ -159,24 +159,70 @@ public final class ProfileSharePackets {
         sender.sendSystemMessage(Component.translatable("wh_npcs.msg.profile.no_permission").withStyle(ChatFormatting.RED));
     }
 
+    /** Трансформация NPC из файла экспорта для действия диалога «transform»: профиль
+     *  перезаписывается содержимым файла, но сохраняет свой id. Без проверки прав —
+     *  контент авторский; ошибки только в лог, без сообщений в чат. */
+    public static void transformFromExport(MinecraftServer server, CompanionEntity npc,
+                                           String file, boolean withEquipment) {
+        try {
+            String name = sanitize(file);
+            Path path = exportsDir(server).resolve(name + ".json");
+            if (!Files.isRegularFile(path)) {
+                WHCompanions.LOGGER.warn("transform: export file '{}' not found", name);
+                return;
+            }
+            JsonObject json;
+            try (Reader r = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+                json = JsonParser.parseReader(r).getAsJsonObject();
+            }
+
+            json.addProperty("id", npc.getProfileId().toString());
+            CompanionProfile profile = CompanionProfile.fromJson(json);
+            ProfileManager.get().save(profile);
+            ProfileSync.applyToLoadedEntities(server, profile);
+            if (withEquipment) {
+                applyEquipment(json, npc);
+            }
+        } catch (Exception e) {
+            WHCompanions.LOGGER.warn("transform: failed for file '{}': {}", file, e.getMessage());
+        }
+    }
+
+    /** Применяет секцию "equipment" (SNBT) из файла экспорта к NPC. Неизвестные предметы
+     *  (мод отсутствует) молча выпадают — ItemStack.of вернёт пустой стак. */
+    public static void applyEquipment(JsonObject json, CompanionEntity npc) {
+        if (!json.has("equipment")) {
+            return;
+        }
+        try {
+            npc.loadEquipmentSnapshot(net.minecraft.nbt.TagParser.parseTag(
+                    json.get("equipment").getAsString()));
+        } catch (Exception e) {
+            WHCompanions.LOGGER.warn("Bad equipment section in export: {}", e.getMessage());
+        }
+    }
+
     public static final class Export {
 
         private final byte[] json;
+        private final int entityId;
 
-        public Export(byte[] json) {
+        public Export(byte[] json, int entityId) {
             this.json = json;
+            this.entityId = entityId;
         }
 
-        public Export(JsonObject json) {
-            this(json.toString().getBytes(StandardCharsets.UTF_8));
+        public Export(JsonObject json, int entityId) {
+            this(json.toString().getBytes(StandardCharsets.UTF_8), entityId);
         }
 
         public static void encode(Export p, FriendlyByteBuf buf) {
             buf.writeByteArray(p.json);
+            buf.writeVarInt(p.entityId);
         }
 
         public static Export decode(FriendlyByteBuf buf) {
-            return new Export(buf.readByteArray(EditorDataPacket.MAX_JSON_BYTES));
+            return new Export(buf.readByteArray(EditorDataPacket.MAX_JSON_BYTES), buf.readVarInt());
         }
 
         public static void handle(Export p, Supplier<NetworkEvent.Context> ctx) {
@@ -196,6 +242,10 @@ public final class ProfileSharePackets {
                 JsonObject json = JsonParser.parseString(
                         new String(p.json, StandardCharsets.UTF_8)).getAsJsonObject();
                 json.addProperty("exported_by", sender.getGameProfile().getName());
+                // Снаряжение живёт на сущности, не в профиле — снимаем с живого NPC.
+                if (sender.serverLevel().getEntity(p.entityId) instanceof CompanionEntity npc) {
+                    json.addProperty("equipment", npc.saveEquipmentSnapshot().toString());
+                }
                 String name = json.has("name") ? json.get("name").getAsString() : "npc";
                 String id = json.has("id") ? json.get("id").getAsString() : "";
                 String file = sanitize(name) + (id.length() >= 8 ? "_" + id.substring(0, 8) : "");
@@ -327,6 +377,7 @@ public final class ProfileSharePackets {
                 CompanionProfile profile = CompanionProfile.fromJson(json);
                 ProfileManager.get().save(profile);
                 ProfileSync.applyToLoadedEntities(sender.server, profile);
+                applyEquipment(json, npc);
                 EditorDataPacket.send(sender, profile, p.entityId);
                 sender.sendSystemMessage(Component.translatable("wh_npcs.msg.profile.import_ok", file));
             } catch (Exception e) {
@@ -517,6 +568,7 @@ public final class ProfileSharePackets {
                 npc.setProfileId(profile.getId());
                 String name = json.has("name") ? json.get("name").getAsString() : "NPC";
                 npc.setCustomName(Component.literal(name));
+                applyEquipment(json, npc);
                 level.addFreshEntity(npc);
                 sender.sendSystemMessage(Component.translatable("wh_npcs.msg.profile.spawned", file));
             } catch (Exception e) {
@@ -583,6 +635,7 @@ public final class ProfileSharePackets {
                 npc.setProfileId(profile.getId());
                 String name = json.has("name") ? json.get("name").getAsString() : "NPC";
                 npc.setCustomName(Component.literal(name));
+                applyEquipment(json, npc);
                 level.addFreshEntity(npc);
                 sender.sendSystemMessage(Component.translatable("wh_npcs.msg.profile.spawned", name));
             } catch (Exception e) {
