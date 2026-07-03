@@ -21,17 +21,17 @@ build
 eclipse
 run
 
-# Files from Forge MDK (boilerplate, not part of this mod)
+# Files from Forge MDK
 forge*changelog.txt
 changelog.txt
 README.txt
 CREDITS.txt
 
-# dev notes (комментарии-раскопки, не для релиза)
+# dev notes
 dev-notes/
 
-# patch notes (черновик, не для репозитория)
+# patch notes
 PATCHNOTES-*.md
 
-# локальные jar'ы опциональных модов (Epic Fight и т.п.) — не заливаем, лицензия
+# локальные jar'ы
 libs/
