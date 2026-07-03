@@ -13,6 +13,8 @@ public final class ClientNpcAudio {
 
     private static final float MUSIC_VOLUME = 0.9F;
     private static final float VOICE_VOLUME = 0.9F;
+    // Свежезапущенный звук может ещё не числиться в SoundEngine — не проверяем активность первые тики
+    private static final int START_GRACE_TICKS = 40;
 
     private ClientNpcAudio() {
     }
@@ -26,6 +28,7 @@ public final class ClientNpcAudio {
     private static boolean musicMuted;
     private static boolean musicFading;
     private static float musicGain = 1.0F;
+    private static int musicStartGrace;
 
     @Nullable
     private static String musicId;
@@ -51,6 +54,7 @@ public final class ClientNpcAudio {
         musicMuted = false;
         musicFading = false;
         musicGain = 1.0F;
+        musicStartGrace = START_GRACE_TICKS;
         Minecraft.getInstance().getSoundManager().play(inst);
     }
 
@@ -67,6 +71,7 @@ public final class ClientNpcAudio {
         musicMuted = false;
         musicFading = false;
         musicGain = 1.0F;
+        musicStartGrace = START_GRACE_TICKS;
     }
 
     public static void fadeMusic() {
@@ -100,6 +105,15 @@ public final class ClientNpcAudio {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) {
             stopMusicNow();
+            return;
+        }
+        if (musicStartGrace > 0) {
+            musicStartGrace--;
+        } else if (!mc.getSoundManager().isActive(musicSound)) {
+            // Трек без loop доиграл сам — сбрасываем состояние, иначе повтор того же id глохнет на дедупе
+            stopMusicNow();
+            musicId = null;
+            etchedId = "";
             return;
         }
         if (musicMuted && !musicFading) {

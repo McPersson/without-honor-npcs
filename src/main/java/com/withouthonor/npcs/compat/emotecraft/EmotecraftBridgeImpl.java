@@ -147,6 +147,22 @@ public final class EmotecraftBridgeImpl implements EmotecraftBridge, EmotecraftC
         }
     }
 
+    /** Чистка при выгрузке сущности: зацикленные эмоции сами из layers не уходят. */
+    public void onEntityUnload(int entityId) {
+        ModifierLayer<IAnimation> layer = layers.remove(entityId);
+        if (layer != null) {
+            try {
+                layer.setAnimation(null);
+            } catch (Throwable ignored) {
+
+            }
+        }
+    }
+
+    public void clearLayers() {
+        layers.clear();
+    }
+
     @Override
     public boolean applyBodyTransform(CompanionEntity npc, PoseStack ms, float partial) {
         ModifierLayer<IAnimation> layer = layers.get(npc.getId());

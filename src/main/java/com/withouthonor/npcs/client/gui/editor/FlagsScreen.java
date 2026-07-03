@@ -34,6 +34,10 @@ public class FlagsScreen extends ScaledScreen {
     @Nullable
     private List<FlagPackets.FlagRef> flags;
     @Nullable
+    private List<FlagPackets.PlayerRef> playersCache;
+    @Nullable
+    private List<FlagPackets.FlagRef> flagsCache;
+    @Nullable
     private String selectedUuid;
     private String selectedName = "";
 
@@ -65,6 +69,7 @@ public class FlagsScreen extends ScaledScreen {
     public static void acceptPlayers(List<FlagPackets.PlayerRef> list) {
         if (Minecraft.getInstance().screen instanceof FlagsScreen s) {
             s.players = list;
+            s.playersCache = null;
         }
     }
 
@@ -72,6 +77,7 @@ public class FlagsScreen extends ScaledScreen {
         if (Minecraft.getInstance().screen instanceof FlagsScreen s
                 && uuid.equals(s.selectedUuid)) {
             s.flags = list;
+            s.flagsCache = null;
         }
     }
 
@@ -87,7 +93,10 @@ public class FlagsScreen extends ScaledScreen {
         playerSearchBox.setMaxLength(32);
         playerSearchBox.setValue(oldPs);
         playerSearchBox.setHint(Component.translatable("wh_npcs.ui.flags.player_search"));
-        playerSearchBox.setResponder(v -> playerScroll = 0);
+        playerSearchBox.setResponder(v -> {
+            playerScroll = 0;
+            playersCache = null;
+        });
 
         String old = searchBox != null ? searchBox.getValue() : "";
         searchBox = addRenderableWidget(new SelectableEditBox(font, rightX, searchRowY, rightW - 70, 14,
@@ -95,7 +104,10 @@ public class FlagsScreen extends ScaledScreen {
         searchBox.setMaxLength(48);
         searchBox.setValue(old);
         searchBox.setHint(Component.translatable("wh_npcs.ui.flags.search_hint"));
-        searchBox.setResponder(v -> flagScroll = 0);
+        searchBox.setResponder(v -> {
+            flagScroll = 0;
+            flagsCache = null;
+        });
 
         String oldAdd = addBox != null ? addBox.getValue() : "";
         addBox = addRenderableWidget(new SelectableEditBox(font, winX + PAD, bottomY, 188, 16,
@@ -141,6 +153,9 @@ public class FlagsScreen extends ScaledScreen {
     }
 
     private List<FlagPackets.PlayerRef> displayedPlayers() {
+        if (playersCache != null) {
+            return playersCache;
+        }
         List<FlagPackets.PlayerRef> out = new ArrayList<>();
         if (players == null) {
             return out;
@@ -165,10 +180,14 @@ public class FlagsScreen extends ScaledScreen {
         rest.sort(cmp);
         out.addAll(pinned);
         out.addAll(rest);
+        playersCache = out;
         return out;
     }
 
     private List<FlagPackets.FlagRef> displayedFlags() {
+        if (flagsCache != null) {
+            return flagsCache;
+        }
         List<FlagPackets.FlagRef> out = new ArrayList<>();
         if (flags == null) {
             return out;
@@ -180,6 +199,7 @@ public class FlagsScreen extends ScaledScreen {
                 out.add(f);
             }
         }
+        flagsCache = out;
         return out;
     }
 
@@ -380,6 +400,7 @@ public class FlagsScreen extends ScaledScreen {
                         flags.set(i, new FlagPackets.FlagRef(o.name(), desc, o.source(), o.time()));
                     }
                 }
+                flagsCache = null;
             }
         }
         cancelDescEdit();
@@ -400,7 +421,7 @@ public class FlagsScreen extends ScaledScreen {
             for (String line : hoverTooltip.split("\n")) {
                 lines.add(Component.literal(line));
             }
-            g.renderComponentTooltip(font, lines, mouseX, mouseY);
+            queueTooltip(lines);
         }
     }
 
@@ -450,6 +471,7 @@ public class FlagsScreen extends ScaledScreen {
         if (isOver(mouseX, mouseY, sortBtnX(), searchRowY - 1, 22, 16)) {
             playerSortMode = (playerSortMode + 1) % 3;
             playerScroll = 0;
+            playersCache = null;
             return true;
         }
         if (selectedUuid != null && isOver(mouseX, mouseY, winX + PAD + 192, bottomY, 70, 16)) {
@@ -469,12 +491,14 @@ public class FlagsScreen extends ScaledScreen {
                 FlagPackets.PlayerRef p = shown.get(i);
                 if (isOver(mouseX, mouseY, pinX(px), y + 2, 10, 10)) {
                     com.withouthonor.npcs.client.ClientPrefs.get().togglePinnedFlagPlayer(p.uuid());
+                    playersCache = null;
                     return true;
                 }
                 if (isOver(mouseX, mouseY, px + 2, y, LEFT_W - 4, ROW_H)) {
                     selectedUuid = p.uuid();
                     selectedName = p.name();
                     flags = null;
+                    flagsCache = null;
                     flagScroll = 0;
                     NetworkHandler.sendToServer(new FlagPackets.RequestFlags(selectedUuid));
                     return true;
@@ -524,12 +548,18 @@ public class FlagsScreen extends ScaledScreen {
     @Override
     protected boolean mouseScrolledScaled(double mouseX, double mouseY, double delta) {
         recalc();
+        if (editingFlag != null) {
+            commitDescEdit();
+        }
+        int visible = (listH - 8) / ROW_H;
         if (isOver(mouseX, mouseY, winX + PAD, listY, LEFT_W, listH)) {
-            playerScroll -= (int) Math.signum(delta) * 2;
+            int max = players == null ? 0 : Math.max(0, displayedPlayers().size() - visible);
+            playerScroll = Math.max(0, Math.min(max, playerScroll - (int) Math.signum(delta) * 2));
             return true;
         }
         if (isOver(mouseX, mouseY, rightX, listY, rightW, listH)) {
-            flagScroll -= (int) Math.signum(delta) * 2;
+            int max = flags == null ? 0 : Math.max(0, displayedFlags().size() - visible);
+            flagScroll = Math.max(0, Math.min(max, flagScroll - (int) Math.signum(delta) * 2));
             return true;
         }
         return superMouseScrolled(mouseX, mouseY, delta);

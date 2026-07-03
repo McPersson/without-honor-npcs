@@ -37,10 +37,10 @@ public class SpawnerBlockEntityRenderer implements BlockEntityRenderer<SpawnerBl
             return;
         }
         display.setSkinName(skin);
-        try {
-            EntityRenderDispatcher erd = Minecraft.getInstance().getEntityRenderDispatcher();
+        EntityRenderDispatcher erd = Minecraft.getInstance().getEntityRenderDispatcher();
 
-            pose.pushPose();
+        pose.pushPose();
+        try {
             pose.translate(0.5, 0.4, 0.5);
             float f = 0.53125F;
             float scaleBase = Math.max(display.getBbWidth(), display.getBbHeight());
@@ -55,13 +55,14 @@ public class SpawnerBlockEntityRenderer implements BlockEntityRenderer<SpawnerBl
             erd.setRenderShadow(false);
 
             erd.render(display, 0.0, 0.0, 0.0, 0.0F, partialTick, pose, buffer, LightTexture.FULL_BRIGHT);
-            erd.setRenderShadow(true);
-            pose.popPose();
         } catch (Exception e) {
             if (!loggedError) {
                 loggedError = true;
                 WHCompanions.LOGGER.warn("[SpawnerBER] display render failed (cage stays): {}", e.toString(), e);
             }
+        } finally {
+            erd.setRenderShadow(true);
+            pose.popPose();
         }
     }
 }

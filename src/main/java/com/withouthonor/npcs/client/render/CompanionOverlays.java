@@ -34,6 +34,15 @@ public final class CompanionOverlays {
     private CompanionOverlays() {
     }
 
+    public void clearEntity(int entityId) {
+        bubbleCache.remove(entityId);
+    }
+
+    public void clearAll() {
+        bubbleCache.clear();
+        titleCache.clear();
+    }
+
     private static Font font() {
         return Minecraft.getInstance().font;
     }

@@ -26,7 +26,7 @@ public class RequestImagePacket {
 
     public static void handle(RequestImagePacket packet, Supplier<NetworkEvent.Context> ctx) {
         ServerPlayer sender = ctx.get().getSender();
-        if (sender != null) {
+        if (sender != null && sender.hasPermissions(2)) {
             byte[] data = ImageStore.get().read(packet.name);
             if (data == null) {
 

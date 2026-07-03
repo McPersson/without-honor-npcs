@@ -65,6 +65,8 @@ public class WhcCommand {
             new DynamicCommandExceptionType(q -> Component.translatable("wh_npcs.msg.command.not_found", q));
     private static final DynamicCommandExceptionType NOT_LOADED =
             new DynamicCommandExceptionType(q -> Component.translatable("wh_npcs.msg.command.not_loaded", q));
+    private static final DynamicCommandExceptionType CHUNK_LOADING =
+            new DynamicCommandExceptionType(q -> Component.translatable("wh_npcs.msg.command.chunk_loading", q));
 
     private static final SuggestionProvider<CommandSourceStack> DIALOGUE_SUGGESTIONS = (ctx, builder) ->
             SharedSuggestionProvider.suggest(DialogueManager.get().ids(), builder);
@@ -481,7 +483,13 @@ public class WhcCommand {
     private static int edit(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         CompanionProfile profile = resolveProfile(ctx);
 
-        CompanionEntity npc = loadEntity(ctx.getSource().getServer(), resolve(ctx));
+        CompanionIndex.Entry e = resolve(ctx);
+        CompanionEntity npc;
+        try {
+            npc = loadEntity(ctx.getSource().getServer(), e);
+        } catch (CommandSyntaxException ignored) {
+            npc = null;
+        }
         EditorDataPacket.send(ctx.getSource().getPlayerOrException(), profile, npc != null ? npc.getId() : -1);
         return 1;
     }
@@ -714,13 +722,19 @@ public class WhcCommand {
     }
 
     @Nullable
-    private static CompanionEntity loadEntity(MinecraftServer server, CompanionIndex.Entry e) {
+    private static CompanionEntity loadEntity(MinecraftServer server, CompanionIndex.Entry e)
+            throws CommandSyntaxException {
         ServerLevel level = server.getLevel(e.dimension());
         if (level == null) {
             return null;
         }
-        level.getChunk(SectionPos.blockToSectionCoord(e.pos().getX()), SectionPos.blockToSectionCoord(e.pos().getZ()));
+        int chunkX = SectionPos.blockToSectionCoord(e.pos().getX());
+        int chunkZ = SectionPos.blockToSectionCoord(e.pos().getZ());
+        level.getChunk(chunkX, chunkZ);
         Entity entity = level.getEntity(e.id());
+        if (entity == null && !level.areEntitiesLoaded(net.minecraft.world.level.ChunkPos.asLong(chunkX, chunkZ))) {
+            throw CHUNK_LOADING.create(e.name());
+        }
         return entity instanceof CompanionEntity companion ? companion : null;
     }
 

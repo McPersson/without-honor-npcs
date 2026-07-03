@@ -56,6 +56,8 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
 
     private final Map<CompanionEntity, Entity> disguiseDelegates = new WeakHashMap<>();
     private final Map<Entity, EntityRenderer<? super Entity>> disguiseRenderers = new WeakHashMap<>();
+    // Негативный кэш: не пересоздавать сломанный/неизвестный облик каждый кадр
+    private static final java.util.Set<String> failedDisguises = new java.util.HashSet<>();
 
     @Override
     public void render(CompanionEntity entity, float entityYaw, float partialTicks,
@@ -158,8 +160,12 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
                 && disguise.equals(EntityType.getKey(delegate.getType()).toString())) {
             return delegate;
         }
+        if (failedDisguises.contains(disguise)) {
+            return null;
+        }
         EntityType<?> type = EntityType.byString(disguise).orElse(null);
         if (type == null) {
+            failedDisguises.add(disguise);
             return null;
         }
         try {
@@ -169,6 +175,7 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
             delegate = null;
         }
         if (delegate == null) {
+            failedDisguises.add(disguise);
             disguiseDelegates.remove(npc);
             return null;
         }

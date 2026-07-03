@@ -86,7 +86,7 @@ public class NodeTypeScreen extends ScaledScreen {
             }
             case "check" -> {
                 chanceBox = add(boxX, bodyY() + 24, 46, "100", String.valueOf(node.getCheckChance()), 3,
-                        v -> node.setCheckChance(parseInt(v, 100)));
+                        v -> node.setCheckChance(Math.max(0, Math.min(100, parseInt(v, 100)))));
                 successBox = add(boxX, bodyY() + 48, boxW, Component.translatable("wh_npcs.ui.node_type.hint_node_id").getString(), node.getCheckSuccessNext(), 64,
                         node::setCheckSuccessNext);
                 failBox = add(boxX, bodyY() + 72, boxW, Component.translatable("wh_npcs.ui.node_type.hint_node_id").getString(), node.getCheckFailNext(), 64,
@@ -260,9 +260,7 @@ public class NodeTypeScreen extends ScaledScreen {
     }
 
     private void drawBtn(GuiGraphics g, String label, int x, int y, int w, int mouseX, int mouseY, int color) {
-        boolean hovered = isOver(mouseX, mouseY, x, y, w, 18);
-        VanillaUIHelper.drawButton(g, x, y, w, 18, hovered);
-        g.drawCenteredString(font, label, x + w / 2, y + 5, hovered ? VanillaUIHelper.TEXT_YELLOW : color);
+        VanillaUIHelper.drawSmallButton(g, font, label, x, y, w, isOver(mouseX, mouseY, x, y, w, 18), color);
     }
 
     @Override

@@ -48,6 +48,9 @@ public class ScheduleTransformScreen extends ScaledScreen {
     @Nullable
     private String tooltip;
 
+    private boolean saved;
+    private float origYRot, origYRotO, origYBodyRot, origYBodyRotO, origYHeadRot, origYHeadRotO;
+
     public ScheduleTransformScreen(Screen parent, JsonObject tf, @Nullable CompanionEntity npc,
                                    boolean freeze, BiConsumer<JsonObject, Boolean> onApply) {
         super(Component.translatable("wh_npcs.ui.schedule_tf.title"));
@@ -56,6 +59,14 @@ public class ScheduleTransformScreen extends ScaledScreen {
         this.npc = npc;
         this.freeze = freeze;
         this.onApply = onApply;
+        if (npc != null) {
+            origYRot = npc.getYRot();
+            origYRotO = npc.yRotO;
+            origYBodyRot = npc.yBodyRot;
+            origYBodyRotO = npc.yBodyRotO;
+            origYHeadRot = npc.getYHeadRot();
+            origYHeadRotO = npc.yHeadRotO;
+        }
     }
 
     @Override
@@ -231,7 +242,7 @@ public class ScheduleTransformScreen extends ScaledScreen {
             for (String line : tooltip.split("\n")) {
                 lines.add(Component.literal(line));
             }
-            g.renderComponentTooltip(font, lines, mouseX, mouseY);
+            queueTooltip(lines);
         }
     }
 
@@ -266,6 +277,7 @@ public class ScheduleTransformScreen extends ScaledScreen {
             return true;
         }
         if (button == 0 && isOver(mx, my, doneX(), bottomY(), 70, 18)) {
+            saved = true;
             onApply.accept(tf, freeze);
             if (minecraft != null) {
                 minecraft.setScreen(parent);
@@ -332,9 +344,7 @@ public class ScheduleTransformScreen extends ScaledScreen {
     }
 
     private void drawBtn(GuiGraphics g, String label, int x, int y, int w, int mouseX, int mouseY, int color) {
-        boolean hovered = isOver(mouseX, mouseY, x, y, w, 18);
-        VanillaUIHelper.drawButton(g, x, y, w, 18, hovered);
-        g.drawCenteredString(font, label, x + w / 2, y + 5, hovered ? VanillaUIHelper.TEXT_YELLOW : color);
+        VanillaUIHelper.drawSmallButton(g, font, label, x, y, w, isOver(mouseX, mouseY, x, y, w, 18), color);
     }
 
     private static boolean isOver(double mx, double my, int x, int y, int w, int h) {
@@ -343,6 +353,15 @@ public class ScheduleTransformScreen extends ScaledScreen {
 
     @Override
     public void onClose() {
+        if (!saved && npc != null) {
+            npc.revertRenderTransformPreview();
+            npc.setYRot(origYRot);
+            npc.yRotO = origYRotO;
+            npc.yBodyRot = origYBodyRot;
+            npc.yBodyRotO = origYBodyRotO;
+            npc.setYHeadRot(origYHeadRot);
+            npc.yHeadRotO = origYHeadRotO;
+        }
         if (minecraft != null) {
             minecraft.setScreen(parent);
         }

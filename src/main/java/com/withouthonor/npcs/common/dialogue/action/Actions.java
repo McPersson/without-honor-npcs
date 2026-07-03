@@ -540,9 +540,16 @@ public final class Actions {
         @Override
         public void execute(DialogueCondition.Context ctx) {
             String resolved = Placeholders.apply(command, ctx);
-            String root = resolved.strip();
-            root = (root.startsWith("/") ? root.substring(1) : root).split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
-            if (BLOCKED.contains(root)) {
+            // Блоклист совещательный (автор диалога и так OP-2): ловим корень
+            // и вложенные команды после "run" в цепочках /execute.
+            String[] tokens = resolved.strip().split("\\s+");
+            boolean blocked = tokens.length > 0 && BLOCKED.contains(stripSlash(tokens[0]));
+            for (int i = 1; !blocked && i < tokens.length - 1; i++) {
+                if ("run".equalsIgnoreCase(tokens[i]) && BLOCKED.contains(stripSlash(tokens[i + 1]))) {
+                    blocked = true;
+                }
+            }
+            if (blocked) {
                 WHCompanions.LOGGER.warn("run_command blocked: '{}' (player {})",
                         resolved, ctx.player().getGameProfile().getName());
                 return;
@@ -551,6 +558,11 @@ public final class Actions {
             player.server.getCommands().performPrefixedCommand(
                     player.createCommandSourceStack().withPermission(2).withSuppressedOutput(),
                     resolved);
+        }
+
+        private static String stripSlash(String token) {
+            String t = token.startsWith("/") ? token.substring(1) : token;
+            return t.toLowerCase(Locale.ROOT);
         }
 
         public static RunCommand fromJson(JsonObject json) {

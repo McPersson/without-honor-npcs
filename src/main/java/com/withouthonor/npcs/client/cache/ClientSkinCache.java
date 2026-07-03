@@ -22,11 +22,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Queue;
-import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -63,7 +61,7 @@ public class ClientSkinCache {
     }
 
     private final Map<String, Skin> skins = new HashMap<>();
-    private final Set<String> requested = new HashSet<>();
+    private final Map<String, Long> requested = new HashMap<>();
     private final Map<String, Long> failed = new HashMap<>();
 
     private final Semaphore urlPermits = new Semaphore(MAX_CONCURRENT_URL);
@@ -76,27 +74,46 @@ public class ClientSkinCache {
 
     @Nullable
     public Skin get(String rawName) {
-        String name = rawName.toLowerCase(Locale.ROOT);
+        String name = lowered(rawName);
         Skin skin = skins.get(name);
         if (skin != null) {
             return skin;
         }
+        long now = System.currentTimeMillis();
         Long failAt = failed.get(name);
         if (failAt != null) {
-            if (System.currentTimeMillis() - failAt < FAIL_TTL_MS) {
+            if (now - failAt < FAIL_TTL_MS) {
                 return null;
             }
             failed.remove(name);
             requested.remove(name);
         }
-        if (requested.add(name)) {
-            if (name.startsWith("http://") || name.startsWith("https://")) {
+        boolean isUrl = name.startsWith("http://") || name.startsWith("https://");
+        Long reqAt = requested.get(name);
+        if (reqAt == null) {
+            requested.put(name, now);
+            if (isUrl) {
                 submitUrl(rawName, name);
             } else {
                 NetworkHandler.sendToServer(new RequestSkinPacket(name));
             }
+        } else if (!isUrl && now - reqAt >= FAIL_TTL_MS) {
+            // Ответ сервера потерялся — пробуем ещё раз
+            requested.put(name, now);
+            NetworkHandler.sendToServer(new RequestSkinPacket(name));
         }
         return null;
+    }
+
+    /** toLowerCase без аллокации, если строка уже в нижнем регистре (горячий путь рендера). */
+    private static String lowered(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c != Character.toLowerCase(c)) {
+                return s.toLowerCase(Locale.ROOT);
+            }
+        }
+        return s;
     }
 
 

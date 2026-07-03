@@ -24,6 +24,8 @@ public class ServerEvents {
     public static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         DialogueSessions.remove(event.getEntity().getUUID());
         com.withouthonor.npcs.common.item.NpcMoverItem.clearSelection(event.getEntity().getUUID());
+        com.withouthonor.npcs.network.ImageUploadPacket.onLogout(event.getEntity().getUUID());
+        com.withouthonor.npcs.network.SkinLibraryPackets.Upload.onLogout(event.getEntity().getUUID());
     }
 
     @SubscribeEvent

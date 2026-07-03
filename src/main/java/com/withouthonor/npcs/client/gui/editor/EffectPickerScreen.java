@@ -52,6 +52,8 @@ public class EffectPickerScreen extends ScaledScreen {
 
     private int tab;
     private int scroll;
+    @Nullable
+    private List<Entry> displayedCache;
     private final ScrollDrag scrollbars = new ScrollDrag();
     private int winX, winY, winW, winH, listTop, bottomY;
 
@@ -194,6 +196,7 @@ public class EffectPickerScreen extends ScaledScreen {
             all.add(new Entry(id, effect, effect.getDisplayName().getString(), id.getNamespace().equals("minecraft")));
         }
         all.sort(Comparator.comparing(Entry::name, String.CASE_INSENSITIVE_ORDER));
+        displayedCache = null;
     }
 
     @Override
@@ -209,7 +212,10 @@ public class EffectPickerScreen extends ScaledScreen {
         searchBox.setMaxLength(48);
         searchBox.setValue(old);
         searchBox.setHint(Component.translatable("wh_npcs.ui.effect_picker.search_hint"));
-        searchBox.setResponder(v -> scroll = 0);
+        searchBox.setResponder(v -> {
+            scroll = 0;
+            displayedCache = null;
+        });
 
         if (applyMode) {
             for (int i = 0; i < MAX_ROWS; i++) {
@@ -232,6 +238,9 @@ public class EffectPickerScreen extends ScaledScreen {
     }
 
     private List<Entry> displayed() {
+        if (displayedCache != null) {
+            return displayedCache;
+        }
         String q = searchBox != null ? searchBox.getValue().toLowerCase(Locale.ROOT).trim() : "";
         List<Entry> out = new ArrayList<>();
         for (Entry e : all) {
@@ -247,6 +256,7 @@ public class EffectPickerScreen extends ScaledScreen {
             }
             out.add(e);
         }
+        displayedCache = out;
         return out;
     }
 
@@ -375,7 +385,7 @@ public class EffectPickerScreen extends ScaledScreen {
         for (String line : Component.translatable(key).getString().split("\n")) {
             lines.add(Component.literal(line));
         }
-        g.renderComponentTooltip(font, lines, mouseX, mouseY);
+        queueTooltip(lines);
     }
 
     private boolean overAnyBox(double mx, double my) {
@@ -406,6 +416,7 @@ public class EffectPickerScreen extends ScaledScreen {
             if (isOver(mouseX, mouseY, tx, winY + HEADER_H + 2, 42, 16)) {
                 tab = i;
                 scroll = 0;
+                displayedCache = null;
                 return true;
             }
         }
@@ -459,9 +470,7 @@ public class EffectPickerScreen extends ScaledScreen {
     }
 
     private void drawBtn(GuiGraphics g, String label, int x, int y, int w, int mouseX, int mouseY, int color) {
-        boolean hovered = isOver(mouseX, mouseY, x, y, w, 18);
-        VanillaUIHelper.drawButton(g, x, y, w, 18, hovered);
-        g.drawCenteredString(font, label, x + w / 2, y + 5, hovered ? VanillaUIHelper.TEXT_YELLOW : color);
+        VanillaUIHelper.drawSmallButton(g, font, label, x, y, w, isOver(mouseX, mouseY, x, y, w, 18), color);
     }
 
     @Override

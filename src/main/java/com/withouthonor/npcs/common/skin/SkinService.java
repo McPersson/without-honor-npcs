@@ -24,7 +24,7 @@ import java.util.concurrent.CompletableFuture;
 public class SkinService {
 
     private static final Gson GSON = new Gson();
-    private static final int MAX_SKIN_BYTES = 262144;
+    public static final int MAX_SKIN_BYTES = 262144;
     private static final long FAIL_TTL_MS = 5L * 60L * 1000L;
     private static final Duration REQ_TIMEOUT = Duration.ofSeconds(15);
     private static final String USER_AGENT =

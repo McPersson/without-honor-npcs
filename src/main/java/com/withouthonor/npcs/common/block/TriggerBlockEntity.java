@@ -95,6 +95,9 @@ public class TriggerBlockEntity extends BlockEntity {
         long now = player.level().getGameTime();
         UUID id = player.getUUID();
         Long last = lastInside.put(id, now);
+        if (lastInside.size() > 32) {
+            lastInside.values().removeIf(t -> now - t > 10L);
+        }
         boolean entered = last == null || now - last > 1L;
         if (!entered) {
             return;

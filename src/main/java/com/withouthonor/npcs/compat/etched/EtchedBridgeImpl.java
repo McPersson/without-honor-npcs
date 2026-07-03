@@ -117,7 +117,8 @@ public final class EtchedBridgeImpl implements EtchedBridge, EtchedClientBridge 
         if (!OK || url == null || url.isEmpty()) {
             return;
         }
-        if (url.equals(onlineUrl) && online != null) {
+        if (url.equals(onlineUrl) && online != null
+                && Minecraft.getInstance().getSoundManager().isActive(online)) {
             return;
         }
         stopOnline();

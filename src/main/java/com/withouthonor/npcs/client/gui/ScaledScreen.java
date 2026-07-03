@@ -51,7 +51,7 @@ public abstract class ScaledScreen extends Screen {
             return 1F;
         }
         float s = Math.min((width - MARGIN * 2F) / dw, (height - MARGIN * 2F) / dh);
-        return Math.min(1F, s);
+        return Math.max(0.1F, Math.min(1F, s));
     }
 
     private double toDesignX(double x) {
@@ -95,7 +95,11 @@ public abstract class ScaledScreen extends Screen {
         scissorScale = 1F;
         pose.popPose();
         if (this.pendingTooltip != null) {
+            // Выше оверлеев на z=400 (тип-пикеры, превью), иначе их текст батчится поверх тултипа.
+            pose.pushPose();
+            pose.translate(0, 0, 500);
             g.renderComponentTooltip(this.font, this.pendingTooltip, this.rawMouseX, this.rawMouseY);
+            pose.popPose();
             this.pendingTooltip = null;
         }
     }

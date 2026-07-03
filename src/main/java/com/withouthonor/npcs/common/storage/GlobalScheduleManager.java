@@ -45,6 +45,7 @@ public class GlobalScheduleManager extends SavedData {
         BlockPos target;
         ChunkPos src;
         ChunkPos dst;
+        ResourceKey<Level> dim;
         long deadline;
     }
 
@@ -73,18 +74,29 @@ public class GlobalScheduleManager extends SavedData {
         }
         ScheduleEntry entry = activeEntry(server, profile);
         Rec r = records.computeIfAbsent(npc.getUUID(), u -> new Rec());
-        r.profileId = npc.getProfileId();
-        r.dim = npc.level().dimension();
-        r.lastPos = npc.blockPosition();
-        r.lastEntryTime = entry != null ? entry.time() : -1;
+        UUID profileId = npc.getProfileId();
+        ResourceKey<Level> dim = npc.level().dimension();
+        BlockPos pos = npc.blockPosition();
+        int entryTime = entry != null ? entry.time() : -1;
+        if (profileId.equals(r.profileId) && dim.equals(r.dim)
+                && pos.equals(r.lastPos) && entryTime == r.lastEntryTime) {
+            return;
+        }
+        r.profileId = profileId;
+        r.dim = dim;
+        r.lastPos = pos;
+        r.lastEntryTime = entryTime;
         setDirty();
     }
 
-    public void forget(UUID uuid) {
+    public void forget(MinecraftServer server, UUID uuid) {
         if (records.remove(uuid) != null) {
             setDirty();
         }
-        pending.remove(uuid);
+        Pending p = pending.remove(uuid);
+        if (p != null) {
+            releaseTickets(server, p);
+        }
     }
 
     public void tick(MinecraftServer server) {
@@ -143,6 +155,7 @@ public class GlobalScheduleManager extends SavedData {
                 p.target = target;
                 p.src = src;
                 p.dst = dst;
+                p.dim = r.dim;
                 p.deadline = now + 120;
                 pending.put(uuid, p);
                 WHCompanions.LOGGER.info("Global schedule: loading chunks {} -> {} to relocate {}", src, dst, uuid);
@@ -162,16 +175,19 @@ public class GlobalScheduleManager extends SavedData {
             Pending p = e.getValue();
             Rec r = records.get(uuid);
             if (r == null || r.dim == null) {
+                releaseTickets(server, p);
                 it.remove();
                 continue;
             }
             ServerLevel level = server.getLevel(r.dim);
             if (level == null) {
+                releaseTickets(server, p);
                 it.remove();
                 continue;
             }
             CompanionEntity npc = loadedNpc(level, uuid);
             if (npc != null) {
+                releaseTickets(level, p);
                 relocate(npc, p.target);
                 r.lastPos = p.target;
                 CompanionProfile profile = ProfileManager.get().get(r.profileId);
@@ -180,7 +196,6 @@ public class GlobalScheduleManager extends SavedData {
                     r.lastEntryTime = entry.time();
                 }
                 setDirty();
-                releaseTickets(level, p);
                 WHCompanions.LOGGER.info("Global schedule: relocated {} to {}", uuid, p.target);
                 it.remove();
             } else if (now > p.deadline) {
@@ -204,6 +219,13 @@ public class GlobalScheduleManager extends SavedData {
         }
         if (p.dst != null) {
             level.getChunkSource().removeRegionTicket(LOAD_TICKET, p.dst, 2, p.dst);
+        }
+    }
+
+    private static void releaseTickets(MinecraftServer server, Pending p) {
+        ServerLevel level = p.dim != null ? server.getLevel(p.dim) : null;
+        if (level != null) {
+            releaseTickets(level, p);
         }
     }
 
@@ -250,7 +272,17 @@ public class GlobalScheduleManager extends SavedData {
             ProfileManager.get().save(profile);
             com.withouthonor.npcs.common.profile.ProfileSync.applyToLoadedEntities(server, profile);
         }
-        records.entrySet().removeIf(en -> pid.equals(en.getValue().profileId));
+        Iterator<Map.Entry<UUID, Rec>> it = records.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<UUID, Rec> en = it.next();
+            if (pid.equals(en.getValue().profileId)) {
+                Pending p = pending.remove(en.getKey());
+                if (p != null) {
+                    releaseTickets(server, p);
+                }
+                it.remove();
+            }
+        }
         setDirty();
     }
 

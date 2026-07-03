@@ -178,7 +178,7 @@ public class NpcEditorScreen extends ScaledScreen {
     private final List<EditBox> entryBoxes = new ArrayList<>();
     private int entryScroll;
     private static final int ENTRY_ROW_H = 22;
-    private static final int ENTRY_VISIBLE = 5;
+    private static final int ENTRY_VISIBLE = 10;
     private static final net.minecraft.resources.ResourceLocation INDICATOR_ATLAS =
             net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("wh_npcs", "textures/entity/emotes.png");
 
@@ -1897,7 +1897,8 @@ public class NpcEditorScreen extends ScaledScreen {
         String previewName = nameBox != null && !nameBox.getValue().isBlank()
                 ? nameBox.getValue() : str("name", "NPC");
         g.drawString(font, previewName, winX + PAD, winY + 8, VanillaUIHelper.TEXT_YELLOW, false);
-        String shortId = str("id", "????????").substring(0, 8);
+        String fullId = str("id", "????????");
+        String shortId = fullId.substring(0, Math.min(8, fullId.length()));
         g.drawString(font, "id: " + shortId, winX + winW - PAD - font.width("id: " + shortId), winY + 8,
                 VanillaUIHelper.TEXT_DARK_GRAY, false);
 

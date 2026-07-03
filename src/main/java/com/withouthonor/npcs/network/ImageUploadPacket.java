@@ -25,6 +25,10 @@ public class ImageUploadPacket {
 
     private static final Map<UUID, Buf> BUFFERS = new HashMap<>();
 
+    public static void onLogout(UUID playerId) {
+        BUFFERS.remove(playerId);
+    }
+
     private final boolean avatar;
     private final int index;
     private final int total;

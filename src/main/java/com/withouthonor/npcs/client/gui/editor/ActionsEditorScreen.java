@@ -2,6 +2,7 @@ package com.withouthonor.npcs.client.gui.editor;
 
 import com.withouthonor.npcs.client.ClientFactions;
 import com.withouthonor.npcs.client.gui.ScaledScreen;
+import com.withouthonor.npcs.client.gui.ScrollDrag;
 import com.withouthonor.npcs.client.gui.SelectableEditBox;
 import com.withouthonor.npcs.client.gui.VanillaUIHelper;
 import com.withouthonor.npcs.common.dialogue.DialogueChoice;
@@ -81,22 +82,32 @@ public class ActionsEditorScreen extends ScaledScreen {
 
     private int selected = -1;
     private boolean typePicker;
+    private int listScroll;
+    private final ScrollDrag scrollbars = new ScrollDrag();
 
-    private final ResourceLocation[] slotItem = new ResourceLocation[3];
-    private final CompoundTag[] slotNbt = new CompoundTag[3];
-    private final int[] slotCount = new int[3];
-    private final EditBox[] countBoxes = new EditBox[3];
+    private static final int ACT_SLOTS = 4;
+
+    private final ResourceLocation[] slotItem = new ResourceLocation[ACT_SLOTS];
+    private final CompoundTag[] slotNbt = new CompoundTag[ACT_SLOTS];
+    private final int[] slotCount = new int[ACT_SLOTS];
+    private final EditBox[] countBoxes = new EditBox[ACT_SLOTS];
     private int activeSlot;
+
+    // числовые поля с драг-скрабом и кнопками −/+
+    private final java.util.List<com.withouthonor.npcs.client.gui.NumberScrub> scrubs = new java.util.ArrayList<>();
 
     private EditBox flagBox;
     private boolean flagValue = true;
 
     private EditBox factionBox;
     private EditBox deltaBox;
+    @Nullable
+    private String factionTip;
 
     private EditBox commandBox;
 
-    private EditBox soundBox;
+    @Nullable
+    private ResourceLocation soundDraft;
     private EditBox volumeBox;
     private EditBox pitchBox;
 
@@ -157,16 +168,26 @@ public class ActionsEditorScreen extends ScaledScreen {
         return rightX + 4 + i * COL_STEP;
     }
 
+    /** Базовая линия контента правой панели — под заголовком и разделителем. */
+    private int edY() {
+        return mainY + 20;
+    }
+
+    /** База раскладки «Предметы» — на 12px выше edY(), локальный заголовок убран. */
+    private int itemsY() {
+        return edY() - 12;
+    }
+
     private int slotRowY() {
-        return mainY + 26;
+        return itemsY() + 26;
     }
 
     private int countY() {
-        return mainY + 50;
+        return itemsY() + 50;
     }
 
     private int invGridY() {
-        return mainY + 96;
+        return itemsY() + 96;
     }
 
     private int emoteCellX(int i) {
@@ -174,11 +195,11 @@ public class ActionsEditorScreen extends ScaledScreen {
     }
 
     private int emoteRowY() {
-        return mainY + 30;
+        return edY() + 30;
     }
 
     private int monoNavY() {
-        return mainY + 2;
+        return edY() + 2;
     }
 
     private int monoPrevX() {
@@ -228,15 +249,17 @@ public class ActionsEditorScreen extends ScaledScreen {
     protected void init() {
         recalc();
         clearWidgets();
+        scrubs.clear();
         DialogueAction action = current();
         if (action == null) {
             return;
         }
         switch (action.type()) {
             case "give_item", "take_item" -> {
-                for (int i = 0; i < 3; i++) {
+                for (int i = 0; i < ACT_SLOTS; i++) {
                     final int slot = i;
-                    countBoxes[i] = addRenderableWidget(new SelectableEditBox(font, colX(i), countY(), 48, 16,
+                    // поле уже + сдвиг на 15px — по бокам кнопки −/+ скраба внутри колонки
+                    countBoxes[i] = addRenderableWidget(new SelectableEditBox(font, colX(i) + 15, countY(), 40, 14,
                             Component.translatable("wh_npcs.ui.actions.count_hint")));
                     countBoxes[i].setMaxLength(4);
                     countBoxes[i].setValue(String.valueOf(Math.max(1, slotCount[i])));
@@ -244,11 +267,13 @@ public class ActionsEditorScreen extends ScaledScreen {
                         slotCount[slot] = parseInt(countBoxes[slot], 1);
                         writeBack();
                     });
+                    scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(countBoxes[i], 1, 999, 1, 0.2F,
+                            "1", true, () -> setFocused(null)));
                 }
             }
             case "set_flag" -> {
                 Actions.SetFlag setFlag = (Actions.SetFlag) action;
-                flagBox = addRenderableWidget(new SelectableEditBox(font, rightX + 60, mainY + 14, 160, 16,
+                flagBox = addRenderableWidget(new SelectableEditBox(font, rightX + 60, edY() + 14, 160, 16,
                         Component.translatable("wh_npcs.ui.actions.flag_field")));
                 flagBox.setMaxLength(64);
                 flagBox.setValue(setFlag.flag());
@@ -256,7 +281,7 @@ public class ActionsEditorScreen extends ScaledScreen {
             }
             case "reputation" -> {
                 Actions.Reputation reputation = (Actions.Reputation) action;
-                factionBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, mainY + 14, 150, 16,
+                factionBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, edY() + 14, 150, 16,
                         Component.translatable("wh_npcs.ui.actions.faction_field")));
                 factionBox.setMaxLength(32);
                 factionBox.setValue(reputation.faction());
@@ -271,10 +296,9 @@ public class ActionsEditorScreen extends ScaledScreen {
                         available.append("\n§b").append(info.id()).append(" §8— §7").append(info.name());
                     }
                 }
-                factionBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
-                        Component.literal(available.toString())));
+                factionTip = available.toString();
                 factionBox.setResponder(v -> writeBack());
-                deltaBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, mainY + 42, 60, 16,
+                deltaBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, edY() + 42, 60, 16,
                         Component.translatable("wh_npcs.ui.actions.delta_field")));
                 deltaBox.setMaxLength(6);
                 deltaBox.setValue(String.valueOf(reputation.delta()));
@@ -282,7 +306,7 @@ public class ActionsEditorScreen extends ScaledScreen {
             }
             case "say" -> {
                 Actions.Say say = (Actions.Say) action;
-                commandBox = addRenderableWidget(new SelectableEditBox(font, rightX, mainY + 28, rightW - 8, 16,
+                commandBox = addRenderableWidget(new SelectableEditBox(font, rightX, edY() + 28, rightW - 8, 16,
                         Component.translatable("wh_npcs.ui.actions.say_field")));
                 commandBox.setMaxLength(200);
                 commandBox.setValue(EditorCodes.toEditor(say.text()));
@@ -291,7 +315,7 @@ public class ActionsEditorScreen extends ScaledScreen {
             }
             case "run_command" -> {
                 Actions.RunCommand command = (Actions.RunCommand) action;
-                commandBox = addRenderableWidget(new SelectableEditBox(font, rightX, mainY + 28, rightW - 8, 16,
+                commandBox = addRenderableWidget(new SelectableEditBox(font, rightX, edY() + 28, rightW - 8, 16,
                         Component.translatable("wh_npcs.ui.actions.command_field")));
                 commandBox.setMaxLength(256);
                 commandBox.setValue(command.command());
@@ -299,7 +323,7 @@ public class ActionsEditorScreen extends ScaledScreen {
                 commandBox.setResponder(v -> writeBack());
             }
             case "emotecraft_emote" -> {
-                emoteIdBox = addRenderableWidget(new SelectableEditBox(font, rightX, mainY + 28, rightW - 8, 16,
+                emoteIdBox = addRenderableWidget(new SelectableEditBox(font, rightX, edY() + 28, rightW - 8, 16,
                         Component.translatable("wh_npcs.ui.actions.emote_field")));
                 emoteIdBox.setMaxLength(128);
                 emoteIdBox.setValue(emoteDraftId);
@@ -308,36 +332,35 @@ public class ActionsEditorScreen extends ScaledScreen {
             }
             case "sound" -> {
                 Actions.Sound sound = (Actions.Sound) action;
-                soundBox = addRenderableWidget(new SelectableEditBox(font, rightX + 44, mainY + 14, 186, 16,
-                        Component.translatable("wh_npcs.ui.actions.sound_field")));
-                soundBox.setMaxLength(120);
-                soundBox.setValue(sound.soundId().toString());
-                soundBox.setHint(Component.translatable("wh_npcs.ui.actions.sound_hint"));
-                soundBox.setResponder(v -> writeBack());
-                volumeBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, mainY + 42, 44, 16,
+                soundDraft = sound.soundId();
+                volumeBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, edY() + 46, 44, 16,
                         Component.translatable("wh_npcs.ui.actions.volume_field")));
                 volumeBox.setMaxLength(4);
-                volumeBox.setValue(String.valueOf(sound.volume()));
+                volumeBox.setValue(com.withouthonor.npcs.client.gui.NumberScrub.fmt(sound.volume(), false));
                 volumeBox.setResponder(v -> writeBack());
-                pitchBox = addRenderableWidget(new SelectableEditBox(font, rightX + 170, mainY + 42, 44, 16,
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(
+                        volumeBox, 0.1F, 2.0F, 0.1F, 0.01F, "1", false, () -> setFocused(null)));
+                pitchBox = addRenderableWidget(new SelectableEditBox(font, rightX + 210, edY() + 46, 44, 16,
                         Component.translatable("wh_npcs.ui.actions.pitch_field")));
                 pitchBox.setMaxLength(4);
-                pitchBox.setValue(String.valueOf(sound.pitch()));
+                pitchBox.setValue(com.withouthonor.npcs.client.gui.NumberScrub.fmt(sound.pitch(), false));
                 pitchBox.setResponder(v -> writeBack());
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(
+                        pitchBox, 0.5F, 2.0F, 0.1F, 0.01F, "1", false, () -> setFocused(null)));
             }
             case "title" -> {
                 Actions.Title title = (Actions.Title) action;
-                titleBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, mainY + 14, 150, 16,
+                titleBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, edY() + 14, 150, 16,
                         Component.translatable("wh_npcs.ui.actions.title_field")));
                 titleBox.setMaxLength(80);
                 titleBox.setValue(EditorCodes.toEditor(title.title() != null ? title.title() : ""));
                 titleBox.setResponder(v -> writeBack());
-                subtitleBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, mainY + 42, 150, 16,
+                subtitleBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, edY() + 42, 150, 16,
                         Component.translatable("wh_npcs.ui.actions.subtitle_field")));
                 subtitleBox.setMaxLength(120);
                 subtitleBox.setValue(EditorCodes.toEditor(title.subtitle() != null ? title.subtitle() : ""));
                 subtitleBox.setResponder(v -> writeBack());
-                actionbarBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, mainY + 70, 150, 16,
+                actionbarBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, edY() + 70, 150, 16,
                         Component.translatable("wh_npcs.ui.actions.actionbar_field")));
                 actionbarBox.setMaxLength(120);
                 actionbarBox.setValue(EditorCodes.toEditor(title.actionbar() != null ? title.actionbar() : ""));
@@ -347,20 +370,20 @@ public class ActionsEditorScreen extends ScaledScreen {
                 ensureMonoLines();
                 MonologueLine line = monoLines.get(monoPage);
                 int monoFieldX = rightX + 60;
-                monoNameBox = addRenderableWidget(new SelectableEditBox(font, monoFieldX, mainY + 24,
+                monoNameBox = addRenderableWidget(new SelectableEditBox(font, monoFieldX, edY() + 24,
                         rightW - 64, 16, Component.translatable("wh_npcs.ui.actions.mono_name_field")));
                 monoNameBox.setMaxLength(64);
                 monoNameBox.setValue(EditorCodes.toEditor(line.name()));
                 monoNameBox.setHint(Component.translatable("wh_npcs.ui.actions.mono_name_hint"));
                 monoNameBox.setResponder(v -> writeBack());
-                monoPortraitBox = addRenderableWidget(new SelectableEditBox(font, monoFieldX, mainY + 46,
+                monoPortraitBox = addRenderableWidget(new SelectableEditBox(font, monoFieldX, edY() + 46,
                         rightW - 64, 16, Component.translatable("wh_npcs.ui.actions.mono_portrait_field")));
                 monoPortraitBox.setMaxLength(48);
                 monoPortraitBox.setValue(line.portrait());
                 monoPortraitBox.setHint(Component.translatable("wh_npcs.ui.actions.mono_portrait_hint"));
                 monoPortraitBox.setResponder(v -> writeBack());
                 monoTextEditor = addRenderableWidget(new com.withouthonor.npcs.client.gui.RichTextEditor(
-                        font, rightX, mainY + 84, rightW, 56));
+                        font, rightX, edY() + 84, rightW, 56));
                 monoTextEditor.setValue(line.text());
             }
             default -> {
@@ -369,7 +392,7 @@ public class ActionsEditorScreen extends ScaledScreen {
     }
 
     private void loadDraft() {
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < ACT_SLOTS; i++) {
             slotItem[i] = null;
             slotNbt[i] = null;
             slotCount[i] = 1;
@@ -377,14 +400,14 @@ public class ActionsEditorScreen extends ScaledScreen {
         activeSlot = 0;
         DialogueAction action = current();
         if (action instanceof Actions.GiveItem give) {
-            for (int i = 0; i < Math.min(3, give.items().size()); i++) {
+            for (int i = 0; i < Math.min(ACT_SLOTS, give.items().size()); i++) {
                 Actions.ItemSpec spec = give.items().get(i);
                 slotItem[i] = spec.itemId();
                 slotNbt[i] = spec.nbt();
                 slotCount[i] = spec.count();
             }
         } else if (action instanceof Actions.TakeItem take) {
-            for (int i = 0; i < Math.min(3, take.slots().size()); i++) {
+            for (int i = 0; i < Math.min(ACT_SLOTS, take.slots().size()); i++) {
                 ItemsCondition.Slot slot = take.slots().get(i);
                 slotItem[i] = slot.itemId();
                 slotNbt[i] = slot.nbt();
@@ -402,6 +425,8 @@ public class ActionsEditorScreen extends ScaledScreen {
             effectMode = eff.mode();
             effectRemoveAll = eff.removeAll();
             effectSpecs = new ArrayList<>(eff.effects());
+        } else if (action instanceof Actions.Sound snd) {
+            soundDraft = snd.soundId();
         }
         monoLines = new ArrayList<>();
         monoPage = 0;
@@ -459,7 +484,7 @@ public class ActionsEditorScreen extends ScaledScreen {
             switch (action.type()) {
                 case "give_item" -> {
                     List<Actions.ItemSpec> items = new ArrayList<>();
-                    for (int i = 0; i < 3; i++) {
+                    for (int i = 0; i < ACT_SLOTS; i++) {
                         if (slotItem[i] != null) {
                             items.add(new Actions.ItemSpec(slotItem[i], Math.max(1, slotCount[i]), slotNbt[i]));
                         }
@@ -470,7 +495,7 @@ public class ActionsEditorScreen extends ScaledScreen {
                 }
                 case "take_item" -> {
                     List<ItemsCondition.Slot> slots = new ArrayList<>();
-                    for (int i = 0; i < 3; i++) {
+                    for (int i = 0; i < ACT_SLOTS; i++) {
                         if (slotItem[i] != null) {
                             slots.add(new ItemsCondition.Slot(slotItem[i], null, Math.max(1, slotCount[i]),
                                     slotNbt[i] != null ? ItemsCondition.NbtMode.EXACT : ItemsCondition.NbtMode.IGNORE,
@@ -503,10 +528,14 @@ public class ActionsEditorScreen extends ScaledScreen {
                 case "stop_emotecraft_emote" -> actions.set(selected, new Actions.StopEmotecraftEmote());
                 case "run_command" -> actions.set(selected,
                         new Actions.RunCommand(commandBox.getValue().trim()));
-                case "sound" -> actions.set(selected, new Actions.Sound(
-                        ResourceLocation.parse(soundBox.getValue().trim()),
-                        clamp(parseFloat(volumeBox, 1.0F), 0.1F, 2.0F),
-                        clamp(parseFloat(pitchBox, 1.0F), 0.5F, 2.0F)));
+                case "sound" -> {
+                    if (soundDraft != null) {
+                        actions.set(selected, new Actions.Sound(
+                                soundDraft,
+                                clamp(parseFloat(volumeBox, 1.0F), 0.1F, 2.0F),
+                                clamp(parseFloat(pitchBox, 1.0F), 0.5F, 2.0F)));
+                    }
+                }
                 case "title" -> actions.set(selected, new Actions.Title(
                         blankToNull(titleBox), blankToNull(subtitleBox), blankToNull(actionbarBox)));
                 case "monologue" -> {
@@ -593,6 +622,7 @@ public class ActionsEditorScreen extends ScaledScreen {
     @Override
     protected void renderContent(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         recalc();
+        scrollbars.beginFrame();
         VanillaUIHelper.drawWindow(g, winX, winY, winW, winH);
 
         g.fill(winX + 2, winY + 2, winX + winW - 2, winY + HEADER_H - 2, VanillaUIHelper.BG_HEADER);
@@ -618,10 +648,16 @@ public class ActionsEditorScreen extends ScaledScreen {
         }
     }
 
+    private int visibleActionRows() {
+        return Math.max(1, (leftH - 26) / ROW_H);
+    }
+
     private void renderActionList(GuiGraphics g, int mouseX, int mouseY) {
         VanillaUIHelper.drawContentPanel(g, leftX, leftY, LEFT_W, leftH);
+        int visible = visibleActionRows();
+        listScroll = Math.max(0, Math.min(listScroll, Math.max(0, actions.size() - visible)));
         int y = leftY + 4;
-        for (int i = 0; i < actions.size(); i++) {
+        for (int i = listScroll; i < Math.min(actions.size(), listScroll + visible); i++) {
             boolean isSelected = i == selected;
             boolean hovered = isOver(mouseX, mouseY, leftX + 2, y, LEFT_W - 4, ROW_H);
             if (isSelected || hovered) {
@@ -635,6 +671,8 @@ public class ActionsEditorScreen extends ScaledScreen {
             }
             y += ROW_H;
         }
+        VanillaUIHelper.drawScrollbar(g, leftX + LEFT_W - 6, leftY + 3, visible * ROW_H,
+                actions.size(), visible, listScroll, scrollbars, v -> listScroll = v);
         drawSmall(g, Component.translatable("wh_npcs.ui.actions.add").getString(),
                 leftX + 2, leftY + leftH - 20, LEFT_W - 4, mouseX, mouseY,
                 VanillaUIHelper.TEXT_GREEN);
@@ -722,38 +760,60 @@ public class ActionsEditorScreen extends ScaledScreen {
                     rightX + rightW / 2, mainY + 40, VanillaUIHelper.TEXT_WHITE);
             return;
         }
+        // панель + заголовок типа действия (верх вровень с левым списком)
+        VanillaUIHelper.drawContentPanel(g, rightX - 4, mainY, rightW, bottomY - 6 - mainY);
+        TypeInfo info = null;
+        for (TypeInfo t : TYPES) {
+            if (t.type().equals(action.type())) {
+                info = t;
+                break;
+            }
+        }
+        int hx = rightX;
+        int headMaxW = rightW - 8;
+        String headLabel = font.plainSubstrByWidth(info != null
+                ? Component.translatable(info.label()).getString() : action.type(), headMaxW);
+        g.drawString(font, headLabel, hx, mainY + 5, VanillaUIHelper.TEXT_AQUA, false);
+        hx += font.width(headLabel);
+        if (info != null) {
+            String headDesc = font.plainSubstrByWidth(
+                    " — " + Component.translatable(info.description()).getString(), headMaxW - (hx - rightX));
+            g.drawString(font, headDesc, hx, mainY + 5, VanillaUIHelper.TEXT_DARK_GRAY, false);
+        }
+        VanillaUIHelper.drawSeparator(g, rightX, mainY + 16, rightW - 8);
         switch (action.type()) {
-            case "give_item", "take_item" -> renderItemsEditor(g, mouseX, mouseY,
-                    action.type().equals("give_item")
-                            ? Component.translatable("wh_npcs.ui.actions.give_caption").getString()
-                            : Component.translatable("wh_npcs.ui.actions.take_caption").getString());
+            case "give_item", "take_item" -> renderItemsEditor(g, mouseX, mouseY);
             case "set_flag" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.flag_label").getString(),
-                        rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
                 drawSmall(g, flagValue
                                 ? Component.translatable("wh_npcs.ui.actions.flag_set").getString()
                                 : Component.translatable("wh_npcs.ui.actions.flag_unset").getString(),
-                        rightX, mainY + 42, 160, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                        rightX, edY() + 42, 160, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
             }
             case "reputation" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.faction_label").getString(),
-                        rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.delta_label").getString(),
-                        rightX, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 46, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.delta_hint").getString(),
-                        rightX + 148, mainY + 46, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                        rightX + 148, edY() + 46, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                if (factionBox != null && factionTip != null && isOver(mouseX, mouseY,
+                        factionBox.getX(), factionBox.getY(), factionBox.getWidth(), factionBox.getHeight())) {
+                    multilineTooltip(g, factionTip, mouseX, mouseY);
+                }
             }
             case "say" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.say_caption").getString(),
-                        rightX, mainY + 14, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 14, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.say_note1").getString(),
-                        rightX, mainY + 52, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 52, VanillaUIHelper.TEXT_WHITE, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.say_note2").getString(),
-                        rightX, mainY + 64, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 64, VanillaUIHelper.TEXT_WHITE, false);
             }
             case "emote" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.emote_caption").getString(),
-                        rightX, mainY + 14, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 14, VanillaUIHelper.TEXT_GRAY, false);
                 EmoteIcon[] icons = EmoteIcon.values();
                 int frames = EmoteIcon.COUNT;
                 for (int i = 0; i < icons.length; i++) {
@@ -778,89 +838,100 @@ public class ActionsEditorScreen extends ScaledScreen {
             }
             case "emotecraft_emote" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.emotecraft_caption").getString(),
-                        rightX, mainY + 14, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 14, VanillaUIHelper.TEXT_GRAY, false);
                 drawSmall(g, Component.translatable("wh_npcs.ui.actions.emotecraft_pick").getString(),
-                        rightX, mainY + 50, 150, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                        rightX, edY() + 50, 150, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.emotecraft_note1").getString(),
-                        rightX, mainY + 76, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 76, VanillaUIHelper.TEXT_WHITE, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.emotecraft_note2").getString(),
-                        rightX, mainY + 88, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 88, VanillaUIHelper.TEXT_WHITE, false);
             }
             case "stop_emotecraft_emote" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.stop_emote_line1").getString(),
-                        rightX, mainY + 14, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 14, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.stop_emote_line2").getString(),
-                        rightX, mainY + 26, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 26, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.stop_emote_note").getString(),
-                        rightX, mainY + 46, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 46, VanillaUIHelper.TEXT_WHITE, false);
             }
             case "open_trade" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.trade_line1").getString(),
-                        rightX, mainY + 14, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 14, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.trade_line2").getString(),
-                        rightX, mainY + 26, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 26, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.trade_note1").getString(),
-                        rightX, mainY + 46, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 46, VanillaUIHelper.TEXT_WHITE, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.trade_note2").getString(),
-                        rightX, mainY + 58, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 58, VanillaUIHelper.TEXT_WHITE, false);
             }
             case "stop_music" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.stop_music_line1").getString(),
-                        rightX, mainY + 14, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 14, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.stop_music_line2").getString(),
-                        rightX, mainY + 26, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 26, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.stop_music_note1").getString(),
-                        rightX, mainY + 46, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 46, VanillaUIHelper.TEXT_WHITE, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.stop_music_note2").getString(),
-                        rightX, mainY + 58, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 58, VanillaUIHelper.TEXT_WHITE, false);
             }
             case "follow" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.follow_line1").getString(),
-                        rightX, mainY + 14, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 14, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.follow_note1").getString(),
-                        rightX, mainY + 40, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 40, VanillaUIHelper.TEXT_WHITE, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.follow_note2").getString(),
-                        rightX, mainY + 52, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 52, VanillaUIHelper.TEXT_WHITE, false);
             }
             case "stop_follow" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.stop_follow_line1").getString(),
-                        rightX, mainY + 14, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 14, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.stop_follow_line2").getString(),
-                        rightX, mainY + 26, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 26, VanillaUIHelper.TEXT_GRAY, false);
             }
             case "follow_wait" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.follow_wait_line1").getString(),
-                        rightX, mainY + 14, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 14, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.follow_wait_line2").getString(),
-                        rightX, mainY + 26, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 26, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.follow_wait_note").getString(),
-                        rightX, mainY + 46, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 46, VanillaUIHelper.TEXT_WHITE, false);
             }
             case "run_command" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.command_caption").getString(),
-                        rightX, mainY + 14, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 14, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.command_note1").getString(),
-                        rightX, mainY + 52, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 52, VanillaUIHelper.TEXT_WHITE, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.command_note2").getString(),
-                        rightX, mainY + 64, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 64, VanillaUIHelper.TEXT_WHITE, false);
             }
             case "sound" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.sound_label").getString(),
-                        rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                String id = soundDraft != null ? soundDraft.toString() : "—";
+                g.drawString(font, font.plainSubstrByWidth(id, rightW - 160),
+                        rightX + 44, edY() + 18, VanillaUIHelper.TEXT_AQUA, false);
+                if (soundDraft != null && isOver(mouseX, mouseY, rightX + 44, edY() + 14, rightW - 160, 16)
+                        && font.width(id) > rightW - 160) {
+                    multilineTooltip(g, id, mouseX, mouseY);
+                }
+                drawSmall(g, Component.translatable("wh_npcs.ui.actions.sound_pick").getString(),
+                        rightX + rightW - 106, edY() + 12, 98, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.volume_label").getString(),
-                        rightX + 24, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 50, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.pitch_label").getString(),
-                        rightX + 146, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX + 160, edY() + 50, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.sound_scrub_note").getString(),
+                        rightX, edY() + 74, VanillaUIHelper.TEXT_DARK_GRAY, false);
             }
             case "title" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.title_label").getString(),
-                        rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.subtitle_label").getString(),
-                        rightX, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 46, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.actionbar_label").getString(),
-                        rightX, mainY + 74, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 74, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.title_note").getString(),
-                        rightX, mainY + 96, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 96, VanillaUIHelper.TEXT_WHITE, false);
             }
             case "monologue" -> {
 
@@ -873,15 +944,15 @@ public class ActionsEditorScreen extends ScaledScreen {
                 drawSmall(g, "-", monoDelX(), monoNavY(), MONO_BTN_W, mouseX, mouseY, VanillaUIHelper.TEXT_RED);
 
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.mono_name_label").getString(),
-                        rightX, mainY + 28, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 28, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.mono_portrait_label").getString(),
-                        rightX, mainY + 50, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 50, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.mono_text_label").getString(),
-                        rightX, mainY + 72, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 72, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.mono_add_note").getString(),
-                        rightX + 96, mainY + 72, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX + 96, edY() + 72, VanillaUIHelper.TEXT_WHITE, false);
 
-                int cy = mainY + 150;
+                int cy = edY() + 150;
                 boolean lockHover = isOver(mouseX, mouseY, rightX, cy, 132, 12);
                 VanillaUIHelper.drawButton(g, rightX, cy, 12, 12, lockHover);
                 if (monoLock) {
@@ -893,58 +964,62 @@ public class ActionsEditorScreen extends ScaledScreen {
             }
             case "effect" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.effect_caption").getString(),
-                        rightX, mainY + 2, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 2, VanillaUIHelper.TEXT_GRAY, false);
                 boolean apply = !"remove".equals(effectMode);
-                boolean applyHover = isOver(mouseX, mouseY, rightX, mainY + 18, 80, 18);
-                VanillaUIHelper.drawButton(g, rightX, mainY + 18, 80, 18, applyHover || apply);
+                boolean applyHover = isOver(mouseX, mouseY, rightX, edY() + 18, 80, 18);
+                VanillaUIHelper.drawButton(g, rightX, edY() + 18, 80, 18, applyHover || apply);
                 g.drawCenteredString(font, Component.translatable("wh_npcs.ui.actions.effect_apply").getString(),
-                        rightX + 40, mainY + 23, apply ? VanillaUIHelper.TEXT_YELLOW
+                        rightX + 40, edY() + 23, apply ? VanillaUIHelper.TEXT_YELLOW
                                 : (applyHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA));
-                boolean removeHover = isOver(mouseX, mouseY, rightX + 86, mainY + 18, 80, 18);
-                VanillaUIHelper.drawButton(g, rightX + 86, mainY + 18, 80, 18, removeHover || !apply);
+                boolean removeHover = isOver(mouseX, mouseY, rightX + 86, edY() + 18, 80, 18);
+                VanillaUIHelper.drawButton(g, rightX + 86, edY() + 18, 80, 18, removeHover || !apply);
                 g.drawCenteredString(font, Component.translatable("wh_npcs.ui.actions.effect_remove").getString(),
-                        rightX + 126, mainY + 23, !apply ? VanillaUIHelper.TEXT_YELLOW
+                        rightX + 126, edY() + 23, !apply ? VanillaUIHelper.TEXT_YELLOW
                                 : (removeHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA));
                 if (apply) {
                     drawSmall(g, Component.translatable("wh_npcs.ui.actions.effect_pick").getString(),
-                            rightX, mainY + 46, 150, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                            rightX, edY() + 46, 150, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
                     g.drawString(font, Component.translatable("wh_npcs.ui.actions.effect_selected",
-                            effectSpecs.size()).getString(), rightX, mainY + 70, VanillaUIHelper.TEXT_WHITE, false);
+                            effectSpecs.size()).getString(), rightX, edY() + 70, VanillaUIHelper.TEXT_WHITE, false);
                     g.drawString(font, Component.translatable("wh_npcs.ui.actions.effect_apply_note").getString(),
-                            rightX, mainY + 82, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                            rightX, edY() + 82, VanillaUIHelper.TEXT_DARK_GRAY, false);
                 } else {
-                    boolean allHover = isOver(mouseX, mouseY, rightX, mainY + 46, 180, 12);
-                    VanillaUIHelper.drawButton(g, rightX, mainY + 46, 12, 12, allHover);
+                    boolean allHover = isOver(mouseX, mouseY, rightX, edY() + 46, 180, 12);
+                    VanillaUIHelper.drawButton(g, rightX, edY() + 46, 12, 12, allHover);
                     if (effectRemoveAll) {
-                        g.drawCenteredString(font, "§a✓", rightX + 6, mainY + 48, VanillaUIHelper.TEXT_WHITE);
+                        g.drawCenteredString(font, "§a✓", rightX + 6, edY() + 48, VanillaUIHelper.TEXT_WHITE);
                     }
                     g.drawString(font, Component.translatable("wh_npcs.ui.actions.effect_remove_all").getString(),
-                            rightX + 18, mainY + 48,
+                            rightX + 18, edY() + 48,
                             effectRemoveAll ? VanillaUIHelper.TEXT_WHITE : VanillaUIHelper.TEXT_DARK_GRAY, false);
                     if (!effectRemoveAll) {
                         drawSmall(g, Component.translatable("wh_npcs.ui.actions.effect_pick").getString(),
-                                rightX, mainY + 68, 150, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                                rightX, edY() + 68, 150, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
                         g.drawString(font, Component.translatable("wh_npcs.ui.actions.effect_selected",
-                                effectSpecs.size()).getString(), rightX, mainY + 92,
+                                effectSpecs.size()).getString(), rightX, edY() + 92,
                                 VanillaUIHelper.TEXT_WHITE, false);
                     } else {
                         g.drawString(font, Component.translatable("wh_npcs.ui.actions.effect_remove_all_note")
-                                .getString(), rightX, mainY + 68, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                                .getString(), rightX, edY() + 68, VanillaUIHelper.TEXT_DARK_GRAY, false);
                     }
                 }
             }
             default -> g.drawString(font,
                     Component.translatable("wh_npcs.ui.actions.json_only", action.type()).getString(),
-                    rightX, mainY + 18, VanillaUIHelper.TEXT_STATUS, false);
+                    rightX, edY() + 18, VanillaUIHelper.TEXT_STATUS, false);
+        }
+        if (!typePicker) {
+            for (var s : scrubs) {
+                s.render(g, font, mouseX, mouseY);
+            }
         }
     }
 
-    private void renderItemsEditor(GuiGraphics g, int mouseX, int mouseY, String caption) {
-        g.drawString(font, caption, rightX, mainY + 2, VanillaUIHelper.TEXT_GRAY, false);
-        for (int i = 0; i < 3; i++) {
+    private void renderItemsEditor(GuiGraphics g, int mouseX, int mouseY) {
+        for (int i = 0; i < ACT_SLOTS; i++) {
             int x = colX(i);
             g.drawCenteredString(font, Component.translatable("wh_npcs.ui.actions.slot", i + 1).getString(),
-                    x + 35, mainY + 14,
+                    x + 35, itemsY() + 14,
                     i == activeSlot ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_DARK_GRAY);
             int slotX = x + 26;
             VanillaUIHelper.drawItemSlot(g, slotX, slotRowY(), i == activeSlot);
@@ -961,8 +1036,6 @@ public class ActionsEditorScreen extends ScaledScreen {
                     }
                 }
             }
-            g.drawString(font, Component.translatable("wh_npcs.ui.actions.pcs").getString(),
-                    x + 52, countY() + 3, VanillaUIHelper.TEXT_DARK_GRAY, false);
         }
         VanillaUIHelper.drawSeparator(g, rightX, invGridY() - 16, rightW - 8);
         g.drawString(font, Component.translatable("wh_npcs.ui.actions.inv_caption").getString(),
@@ -1049,7 +1122,7 @@ public class ActionsEditorScreen extends ScaledScreen {
         for (String line : text.split("\n")) {
             lines.add(Component.literal(line));
         }
-        g.renderComponentTooltip(font, lines, x, y);
+        queueTooltip(lines);
     }
 
     private void drawSmall(GuiGraphics g, String label, int x, int y, int w,
@@ -1089,8 +1162,17 @@ public class ActionsEditorScreen extends ScaledScreen {
             return true;
         }
         if (button == 0) {
+            if (scrollbars.click(mouseX, mouseY)) {
+                return true;
+            }
+            for (var s : scrubs) {
+                if (s.mouseClicked(mouseX, mouseY, button)) {
+                    return true;
+                }
+            }
+            int visible = visibleActionRows();
             int y = leftY + 4;
-            for (int i = 0; i < actions.size(); i++) {
+            for (int i = listScroll; i < Math.min(actions.size(), listScroll + visible); i++) {
                 if (isOver(mouseX, mouseY, leftX + 2, y, LEFT_W - 4, ROW_H)) {
                     if (isOver(mouseX, mouseY, leftX + LEFT_W - 16, y, 14, ROW_H)) {
                         actions.remove(i);
@@ -1118,10 +1200,50 @@ public class ActionsEditorScreen extends ScaledScreen {
             if (handleEditorClick(mouseX, mouseY, false)) {
                 return true;
             }
-        } else if (button == 1 && handleEditorClick(mouseX, mouseY, true)) {
-            return true;
+        } else if (button == 1) {
+            for (var s : scrubs) {
+                if (s.mouseClicked(mouseX, mouseY, button)) {
+                    return true;
+                }
+            }
+            if (handleEditorClick(mouseX, mouseY, true)) {
+                return true;
+            }
         }
         return superMouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    protected boolean mouseScrolledScaled(double mouseX, double mouseY, double delta) {
+        recalc();
+        if (!typePicker && isOver(mouseX, mouseY, leftX, leftY, LEFT_W, leftH)) {
+            listScroll = Math.max(0, Math.min(listScroll - (int) Math.signum(delta),
+                    Math.max(0, actions.size() - visibleActionRows())));
+            return true;
+        }
+        return superMouseScrolled(mouseX, mouseY, delta);
+    }
+
+    @Override
+    protected boolean mouseDraggedScaled(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (scrollbars.drag(mouseY)) {
+            return true;
+        }
+        for (var s : scrubs) {
+            if (s.mouseDragged(mouseX, mouseY, button)) {
+                return true;
+            }
+        }
+        return superMouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    @Override
+    protected boolean mouseReleasedScaled(double mouseX, double mouseY, int button) {
+        scrollbars.release();
+        for (var s : scrubs) {
+            s.mouseReleased();
+        }
+        return superMouseReleased(mouseX, mouseY, button);
     }
 
     private boolean handleEditorClick(double mouseX, double mouseY, boolean rightClick) {
@@ -1130,8 +1252,29 @@ public class ActionsEditorScreen extends ScaledScreen {
             return false;
         }
         switch (action.type()) {
+            case "sound" -> {
+                if (!rightClick && isOver(mouseX, mouseY, rightX + rightW - 106, edY() + 12, 98, 18)
+                        && minecraft != null) {
+                    float p = clamp(parseFloat(pitchBox, 1.0F), 0.5F, 2.0F);
+                    minecraft.setScreen(new VoicePickerScreen(this,
+                            soundDraft != null ? soundDraft.toString() : "", p, (id, pitch) -> {
+                        if (id != null && !id.isBlank()) {
+                            ResourceLocation parsed = ResourceLocation.tryParse(id);
+                            if (parsed != null) {
+                                soundDraft = parsed;
+                            }
+                        }
+                        if (pitchBox != null) {
+                            pitchBox.setValue(com.withouthonor.npcs.client.gui.NumberScrub.fmt(
+                                    clamp(pitch, 0.5F, 2.0F), false));
+                        }
+                        writeBack();
+                    }));
+                    return true;
+                }
+            }
             case "set_flag" -> {
-                if (!rightClick && isOver(mouseX, mouseY, rightX, mainY + 42, 160, 18)) {
+                if (!rightClick && isOver(mouseX, mouseY, rightX, edY() + 42, 160, 18)) {
                     flagValue = !flagValue;
                     writeBack();
                     return true;
@@ -1150,7 +1293,7 @@ public class ActionsEditorScreen extends ScaledScreen {
                 }
             }
             case "emotecraft_emote" -> {
-                if (!rightClick && isOver(mouseX, mouseY, rightX, mainY + 50, 150, 18)) {
+                if (!rightClick && isOver(mouseX, mouseY, rightX, edY() + 50, 150, 18)) {
                     writeBack();
                     if (minecraft != null) {
                         int idx = selected;
@@ -1186,7 +1329,7 @@ public class ActionsEditorScreen extends ScaledScreen {
                         monoDeletePage();
                         return true;
                     }
-                    if (isOver(mouseX, mouseY, rightX, mainY + 150, 132, 12)) {
+                    if (isOver(mouseX, mouseY, rightX, edY() + 150, 132, 12)) {
                         monoLock = !monoLock;
                         writeBack();
                         return true;
@@ -1197,19 +1340,19 @@ public class ActionsEditorScreen extends ScaledScreen {
                 if (rightClick) {
                     return false;
                 }
-                if (isOver(mouseX, mouseY, rightX, mainY + 18, 80, 18)) {
+                if (isOver(mouseX, mouseY, rightX, edY() + 18, 80, 18)) {
                     effectMode = "apply";
                     writeBack();
                     return true;
                 }
-                if (isOver(mouseX, mouseY, rightX + 86, mainY + 18, 80, 18)) {
+                if (isOver(mouseX, mouseY, rightX + 86, edY() + 18, 80, 18)) {
                     effectMode = "remove";
                     writeBack();
                     return true;
                 }
                 boolean apply = !"remove".equals(effectMode);
                 if (apply) {
-                    if (isOver(mouseX, mouseY, rightX, mainY + 46, 150, 18)) {
+                    if (isOver(mouseX, mouseY, rightX, edY() + 46, 150, 18)) {
                         writeBack();
                         if (minecraft != null) {
                             minecraft.setScreen(EffectPickerScreen.forApply(this, effectSpecs, this::writeBack));
@@ -1217,12 +1360,12 @@ public class ActionsEditorScreen extends ScaledScreen {
                         return true;
                     }
                 } else {
-                    if (isOver(mouseX, mouseY, rightX, mainY + 46, 180, 12)) {
+                    if (isOver(mouseX, mouseY, rightX, edY() + 46, 180, 12)) {
                         effectRemoveAll = !effectRemoveAll;
                         writeBack();
                         return true;
                     }
-                    if (!effectRemoveAll && isOver(mouseX, mouseY, rightX, mainY + 68, 150, 18)) {
+                    if (!effectRemoveAll && isOver(mouseX, mouseY, rightX, edY() + 68, 150, 18)) {
                         writeBack();
                         if (minecraft != null) {
                             List<ResourceLocation> ids = new ArrayList<>();
@@ -1243,7 +1386,7 @@ public class ActionsEditorScreen extends ScaledScreen {
                 }
             }
             case "give_item", "take_item" -> {
-                for (int i = 0; i < 3; i++) {
+                for (int i = 0; i < ACT_SLOTS; i++) {
                     if (isOver(mouseX, mouseY, colX(i) + 26, slotRowY(), 18, 18)) {
                         if (rightClick) {
                             slotItem[i] = null;

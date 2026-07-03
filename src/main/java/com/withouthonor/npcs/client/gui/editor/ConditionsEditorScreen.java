@@ -1,6 +1,7 @@
 package com.withouthonor.npcs.client.gui.editor;
 
 import com.withouthonor.npcs.client.gui.ScaledScreen;
+import com.withouthonor.npcs.client.gui.ScrollDrag;
 import com.withouthonor.npcs.client.gui.SelectableEditBox;
 import com.withouthonor.npcs.client.gui.VanillaUIHelper;
 import com.withouthonor.npcs.common.dialogue.DialogueChoice;
@@ -67,6 +68,8 @@ public class ConditionsEditorScreen extends ScaledScreen {
 
     private int selected = -1;
     private boolean typePicker;
+    private int listScroll;
+    private final ScrollDrag scrollbars = new ScrollDrag();
 
     private EditBox hintBox;
 
@@ -86,6 +89,8 @@ public class ConditionsEditorScreen extends ScaledScreen {
     private EditBox maxBox;
 
     private EditBox factionBox;
+    @Nullable
+    private String factionTip;
 
     private EditBox timeMinBox;
     private EditBox timeMaxBox;
@@ -111,6 +116,9 @@ public class ConditionsEditorScreen extends ScaledScreen {
     private int activeSlot;
 
     private ItemStack carried = ItemStack.EMPTY;
+
+    // числовые поля с драг-скрабом и кнопками −/+
+    private final java.util.List<com.withouthonor.npcs.client.gui.NumberScrub> scrubs = new java.util.ArrayList<>();
 
     @Nullable
     private ResourceLocation heldItemId;
@@ -153,38 +161,49 @@ public class ConditionsEditorScreen extends ScaledScreen {
         return rightX + 4 + i * COL_STEP;
     }
 
+    /** Базовая линия контента правой панели — под заголовком и разделителем. */
+    private int edY() {
+        return mainY + 20;
+    }
+
+    /** База раскладки «Предметы» — на 12px выше edY(), локальный заголовок убран. */
+    private int itemsY() {
+        return edY() - 12;
+    }
+
     private int slotRowY() {
-        return mainY + 26;
+        return itemsY() + 26;
     }
 
     private int countY() {
-        return mainY + 50;
+        return itemsY() + 50;
     }
 
     private int modeY() {
-        return mainY + 70;
+        return itemsY() + 70;
     }
 
     private int tagY() {
-        return mainY + 92;
+        return itemsY() + 92;
     }
 
     private int togglesY() {
-        return mainY + 120;
+        return itemsY() + 120;
     }
 
     private int invGridY() {
-        return mainY + 162;
+        return itemsY() + 162;
     }
 
     private int heldGridY() {
-        return mainY + 56;
+        return edY() + 56;
     }
 
     @Override
     protected void init() {
         recalc();
         clearWidgets();
+        scrubs.clear();
 
         if (choice != null) {
             hintBox = addRenderableWidget(new SelectableEditBox(font, winX + PAD + 92, winY + HEADER_H + 4,
@@ -192,8 +211,6 @@ public class ConditionsEditorScreen extends ScaledScreen {
             hintBox.setMaxLength(120);
             hintBox.setValue(EditorCodes.toEditor(choice.getLockedHint() != null ? choice.getLockedHint() : ""));
             hintBox.setHint(Component.translatable("wh_npcs.ui.conditions.hint_placeholder"));
-            hintBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
-                    Component.translatable("wh_npcs.ui.conditions.hint_tip")));
             hintBox.setResponder(value -> choice.setLockedHint(
                     value.isBlank() ? null : EditorCodes.fromEditor(value)));
         }
@@ -204,7 +221,7 @@ public class ConditionsEditorScreen extends ScaledScreen {
         }
         switch (condition.type()) {
             case "flag" -> {
-                flagBox = addRenderableWidget(new SelectableEditBox(font, rightX + 60, mainY + 14, 160, 16,
+                flagBox = addRenderableWidget(new SelectableEditBox(font, rightX + 60, edY() + 14, 160, 16,
                         Component.translatable("wh_npcs.ui.cond.type.flag.label")));
                 flagBox.setMaxLength(64);
                 flagBox.setValue(((Conditions.Flag) condition).flag());
@@ -212,20 +229,20 @@ public class ConditionsEditorScreen extends ScaledScreen {
             }
             case "var_equals" -> {
                 Conditions.VarEquals ve = (Conditions.VarEquals) condition;
-                varNameBox = addRenderableWidget(new SelectableEditBox(font, rightX + 84, mainY + 14, 146, 16,
+                varNameBox = addRenderableWidget(new SelectableEditBox(font, rightX + 84, edY() + 14, 146, 16,
                         Component.translatable("wh_npcs.ui.cond.type.var_equals.label")));
                 varNameBox.setMaxLength(32);
                 varNameBox.setValue(ve.name());
                 varNameBox.setHint(Component.translatable("wh_npcs.ui.conditions.var_name_hint"));
                 varNameBox.setResponder(v -> writeBack());
-                varValueBox = addRenderableWidget(new SelectableEditBox(font, rightX + 84, mainY + 42, 146, 16,
+                varValueBox = addRenderableWidget(new SelectableEditBox(font, rightX + 84, edY() + 42, 146, 16,
                         Component.translatable("wh_npcs.ui.conditions.var_value")));
                 varValueBox.setMaxLength(64);
                 varValueBox.setValue(ve.value());
                 varValueBox.setResponder(v -> writeBack());
             }
             case "player" -> {
-                namesBox = addRenderableWidget(new SelectableEditBox(font, rightX, mainY + 28, 230, 16,
+                namesBox = addRenderableWidget(new SelectableEditBox(font, rightX, edY() + 28, 230, 16,
                         Component.translatable("wh_npcs.ui.conditions.names")));
                 namesBox.setMaxLength(200);
                 namesBox.setValue(String.join(", ", ((Conditions.PlayerName) condition).namesLower()));
@@ -233,17 +250,24 @@ public class ConditionsEditorScreen extends ScaledScreen {
                 namesBox.setResponder(v -> writeBack());
             }
             case "permission", "random" -> {
-                numberBox = addRenderableWidget(new SelectableEditBox(font, rightX + 90, mainY + 14, 50, 16,
+                boolean perm = condition.type().equals("permission");
+                // сдвиг вправо на 15px — слева от поля кнопка «−» скраба
+                numberBox = addRenderableWidget(new SelectableEditBox(font, rightX + 105, edY() + 14, 50, 16,
                         Component.translatable("wh_npcs.ui.conditions.number")));
                 numberBox.setMaxLength(3);
-                numberBox.setValue(condition.type().equals("permission")
+                numberBox.setValue(perm
                         ? String.valueOf(((Conditions.Permission) condition).level())
                         : String.valueOf(((Conditions.Random) condition).chancePercent()));
                 numberBox.setResponder(v -> writeBack());
+                scrubs.add(perm
+                        ? new com.withouthonor.npcs.client.gui.NumberScrub(numberBox, 0, 4, 1, 0.05F,
+                        "2", true, () -> setFocused(null))
+                        : new com.withouthonor.npcs.client.gui.NumberScrub(numberBox, 1, 100, 5, 0.5F,
+                        "50", true, () -> setFocused(null)));
             }
             case "reputation" -> {
                 Conditions.Reputation reputation = (Conditions.Reputation) condition;
-                factionBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, mainY + 14, 150, 16,
+                factionBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, edY() + 14, 150, 16,
                         Component.translatable("wh_npcs.ui.cond.type.reputation.label")));
                 factionBox.setMaxLength(32);
                 factionBox.setValue(reputation.faction());
@@ -260,37 +284,48 @@ public class ConditionsEditorScreen extends ScaledScreen {
                         available.append("\n§b").append(info.id()).append(" §8— §7").append(info.name());
                     }
                 }
-                factionBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
-                        Component.literal(available.toString())));
+                factionTip = available.toString();
                 factionBox.setResponder(v -> writeBack());
-                minBox = addRenderableWidget(new SelectableEditBox(font, rightX + 40, mainY + 42, 50, 16,
+                // сдвиг вправо на 15px — слева от полей кнопки «−» скраба
+                minBox = addRenderableWidget(new SelectableEditBox(font, rightX + 55, edY() + 42, 50, 16,
                         Component.translatable("wh_npcs.ui.conditions.min")));
                 minBox.setValue(reputation.min() != null ? String.valueOf(reputation.min()) : "");
                 minBox.setResponder(v -> writeBack());
-                maxBox = addRenderableWidget(new SelectableEditBox(font, rightX + 144, mainY + 42, 50, 16,
+                maxBox = addRenderableWidget(new SelectableEditBox(font, rightX + 159, edY() + 42, 50, 16,
                         Component.translatable("wh_npcs.ui.conditions.max")));
                 maxBox.setValue(reputation.max() != null ? String.valueOf(reputation.max()) : "");
                 maxBox.setResponder(v -> writeBack());
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(minBox, -10000, 10000, 5, 1F,
+                        "", true, () -> setFocused(null)));
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(maxBox, -10000, 10000, 5, 1F,
+                        "", true, () -> setFocused(null)));
             }
             case "score" -> {
                 Conditions.Score score = (Conditions.Score) condition;
-                objectiveBox = addRenderableWidget(new SelectableEditBox(font, rightX + 80, mainY + 14, 150, 16,
+                objectiveBox = addRenderableWidget(new SelectableEditBox(font, rightX + 110, edY() + 14, 150, 16,
                         Component.literal("Objective")));
                 objectiveBox.setMaxLength(40);
                 objectiveBox.setValue(score.objective());
+                objectiveBox.setHint(Component.literal("quest_progress"));
                 objectiveBox.setResponder(v -> writeBack());
-                minBox = addRenderableWidget(new SelectableEditBox(font, rightX + 40, mainY + 42, 50, 16,
+                // сдвиг вправо на 15px — слева от полей кнопки «−» скраба
+                minBox = addRenderableWidget(new SelectableEditBox(font, rightX + 55, edY() + 42, 50, 16,
                         Component.translatable("wh_npcs.ui.conditions.min")));
                 minBox.setValue(score.min() != null ? String.valueOf(score.min()) : "");
                 minBox.setResponder(v -> writeBack());
-                maxBox = addRenderableWidget(new SelectableEditBox(font, rightX + 144, mainY + 42, 50, 16,
+                maxBox = addRenderableWidget(new SelectableEditBox(font, rightX + 159, edY() + 42, 50, 16,
                         Component.translatable("wh_npcs.ui.conditions.max")));
                 maxBox.setValue(score.max() != null ? String.valueOf(score.max()) : "");
                 maxBox.setResponder(v -> writeBack());
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(minBox, -1000000, 1000000, 1, 1F,
+                        "", true, () -> setFocused(null)));
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(maxBox, -1000000, 1000000, 1, 1F,
+                        "", true, () -> setFocused(null)));
             }
             case "items" -> {
                 for (int i = 0; i < ItemsCondition.MAX_SLOTS; i++) {
-                    countBoxes[i] = addRenderableWidget(new SelectableEditBox(font, colX(i), countY(), 46, 14,
+                    // поле уже + сдвиг на 15px — по бокам кнопки −/+ скраба внутри колонки
+                    countBoxes[i] = addRenderableWidget(new SelectableEditBox(font, colX(i) + 15, countY(), 40, 14,
                             Component.translatable("wh_npcs.ui.conditions.count")));
                     countBoxes[i].setMaxLength(4);
                     countBoxes[i].setValue(String.valueOf(Math.max(1, slotCount[i])));
@@ -302,6 +337,8 @@ public class ConditionsEditorScreen extends ScaledScreen {
                         } catch (NumberFormatException ignored) {
                         }
                     });
+                    scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(countBoxes[i], 1, 999, 1, 0.2F,
+                            "1", true, () -> setFocused(null)));
                     tagBoxes[i] = addRenderableWidget(new SelectableEditBox(font, colX(i), tagY(), 70, 14,
                             Component.translatable("wh_npcs.ui.conditions.tag")));
                     tagBoxes[i].setMaxLength(80);
@@ -311,15 +348,24 @@ public class ConditionsEditorScreen extends ScaledScreen {
             }
             case "time" -> {
                 Conditions.Time t = (Conditions.Time) condition;
-                timeMinBox = timeField(rightX + 24, mainY + 14, t.minTicks());
-                timeMaxBox = timeField(rightX + 104, mainY + 14, t.maxTicks());
+                timeMinBox = timeField(rightX + 24, edY() + 14, t.minTicks());
+                timeMaxBox = timeField(rightX + 104, edY() + 14, t.maxTicks());
             }
             case "player_state" -> {
                 Conditions.PlayerState ps = (Conditions.PlayerState) condition;
-                hpMinBox = numField(rightX + 34, mainY + 14, ps.hpMin());
-                hpMaxBox = numField(rightX + 92, mainY + 14, ps.hpMax());
-                foodMinBox = numField(rightX + 54, mainY + 42, ps.foodMin());
-                foodMaxBox = numField(rightX + 112, mainY + 42, ps.foodMax());
+                // раздвинуто — между полями и метками кнопки −/+ скраба
+                hpMinBox = numField(rightX + 40, edY() + 14, ps.hpMin());
+                hpMaxBox = numField(rightX + 125, edY() + 14, ps.hpMax());
+                foodMinBox = numField(rightX + 56, edY() + 42, ps.foodMin());
+                foodMaxBox = numField(rightX + 141, edY() + 42, ps.foodMax());
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(hpMinBox, 0, 1024, 1, 0.2F,
+                        "", true, () -> setFocused(null)));
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(hpMaxBox, 0, 1024, 1, 0.2F,
+                        "", true, () -> setFocused(null)));
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(foodMinBox, 0, 20, 1, 0.2F,
+                        "", true, () -> setFocused(null)));
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(foodMaxBox, 0, 20, 1, 0.2F,
+                        "", true, () -> setFocused(null)));
             }
             default -> {
             }
@@ -558,6 +604,7 @@ public class ConditionsEditorScreen extends ScaledScreen {
     @Override
     protected void renderContent(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         recalc();
+        scrollbars.beginFrame();
         editorTooltip = null;
         if (hintBox != null) {
             hintBox.visible = !typePicker;
@@ -578,6 +625,10 @@ public class ConditionsEditorScreen extends ScaledScreen {
         if (choice != null) {
             g.drawString(font, Component.translatable("wh_npcs.ui.conditions.hint_label").getString(),
                     winX + PAD, winY + HEADER_H + 8, VanillaUIHelper.TEXT_GRAY, false);
+            if (hintBox != null && hintBox.visible && isOver(mouseX, mouseY,
+                    hintBox.getX(), hintBox.getY(), hintBox.getWidth(), hintBox.getHeight())) {
+                editorTooltip = Component.translatable("wh_npcs.ui.conditions.hint_tip").getString();
+            }
         }
 
         renderConditionList(g, mouseX, mouseY);
@@ -607,10 +658,16 @@ public class ConditionsEditorScreen extends ScaledScreen {
         }
     }
 
+    private int visibleConditionRows() {
+        return Math.max(1, (leftH - 26) / ROW_H);
+    }
+
     private void renderConditionList(GuiGraphics g, int mouseX, int mouseY) {
         VanillaUIHelper.drawContentPanel(g, leftX, leftY, LEFT_W, leftH);
+        int visible = visibleConditionRows();
+        listScroll = Math.max(0, Math.min(listScroll, Math.max(0, conditions.size() - visible)));
         int y = leftY + 4;
-        for (int i = 0; i < conditions.size(); i++) {
+        for (int i = listScroll; i < Math.min(conditions.size(), listScroll + visible); i++) {
             boolean isSelected = i == selected;
             boolean hovered = isOver(mouseX, mouseY, leftX + 2, y, LEFT_W - 4, ROW_H);
             if (isSelected || hovered) {
@@ -633,6 +690,8 @@ public class ConditionsEditorScreen extends ScaledScreen {
             }
             y += ROW_H;
         }
+        VanillaUIHelper.drawScrollbar(g, leftX + LEFT_W - 6, leftY + 3, visible * ROW_H,
+                conditions.size(), visible, listScroll, scrollbars, v -> listScroll = v);
         drawSmall(g, Component.translatable("wh_npcs.ui.conditions.add").getString(),
                 leftX + 2, leftY + leftH - 20, LEFT_W - 4, mouseX, mouseY,
                 VanillaUIHelper.TEXT_GREEN);
@@ -698,63 +757,94 @@ public class ConditionsEditorScreen extends ScaledScreen {
                     rightX + rightW / 2, mainY + 40, VanillaUIHelper.TEXT_STATUS);
             return;
         }
+        // панель + заголовок типа условия (верх вровень с левым списком)
+        VanillaUIHelper.drawContentPanel(g, rightX - 4, mainY, rightW, bottomY - 6 - mainY);
+        TypeInfo info = null;
+        for (TypeInfo t : TYPES) {
+            if (t.type().equals(condition.type())) {
+                info = t;
+                break;
+            }
+        }
+        int hx = rightX;
+        int headMaxW = rightW - 8;
+        if (invertDraft) {
+            String not = Component.translatable("wh_npcs.ui.conditions.header_not").getString() + " ";
+            g.drawString(font, not, hx, mainY + 5, VanillaUIHelper.TEXT_GOLD, false);
+            hx += font.width(not);
+        }
+        String headLabel = font.plainSubstrByWidth(info != null
+                ? Component.translatable(info.label()).getString() : condition.type(), headMaxW - (hx - rightX));
+        g.drawString(font, headLabel, hx, mainY + 5, VanillaUIHelper.TEXT_AQUA, false);
+        hx += font.width(headLabel);
+        if (info != null) {
+            String headDesc = font.plainSubstrByWidth(
+                    " — " + Component.translatable(info.description()).getString(), headMaxW - (hx - rightX));
+            g.drawString(font, headDesc, hx, mainY + 5, VanillaUIHelper.TEXT_DARK_GRAY, false);
+        }
+        VanillaUIHelper.drawSeparator(g, rightX, mainY + 16, rightW - 8);
         switch (condition.type()) {
             case "flag" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.flag_label").getString(),
-                        rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
                 drawSmall(g, Component.translatable(flagValue
                                 ? "wh_npcs.ui.conditions.flag_set" : "wh_npcs.ui.conditions.flag_unset").getString(),
-                        rightX, mainY + 42, 160, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                        rightX, edY() + 42, 160, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
             }
             case "var_equals" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.var_label").getString(),
-                        rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.var_equals_label").getString(),
-                        rightX, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 46, VanillaUIHelper.TEXT_GRAY, false);
                 drawSmall(g, Component.translatable(varIgnoreCase
                                 ? "wh_npcs.ui.conditions.case_ignore"
                                 : "wh_npcs.ui.conditions.case_strict").getString(),
-                        rightX, mainY + 70, 160, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                        rightX, edY() + 70, 160, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
             }
             case "player" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.player_label").getString(),
-                        rightX, mainY + 14, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 14, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.player_note").getString(),
-                        rightX, mainY + 50, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 50, VanillaUIHelper.TEXT_WHITE, false);
             }
             case "permission" -> g.drawString(font,
                     Component.translatable("wh_npcs.ui.conditions.permission_label").getString(),
-                    rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                    rightX, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
             case "random" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.random_label").getString(),
-                        rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
-                g.drawString(font, "%", rightX + 146, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, "%", rightX + 174, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
             }
             case "reputation" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.faction_label").getString(),
-                        rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.from").getString(),
-                        rightX + 16, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX + 16, edY() + 46, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.to").getString(),
-                        rightX + 120, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX + 126, edY() + 46, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.empty_bound").getString(),
-                        rightX, mainY + 68, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                        rightX, edY() + 68, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                if (factionBox != null && factionBox.visible && factionTip != null && isOver(mouseX, mouseY,
+                        factionBox.getX(), factionBox.getY(), factionBox.getWidth(), factionBox.getHeight())) {
+                    editorTooltip = factionTip;
+                }
             }
             case "score" -> {
-                g.drawString(font, "Objective:", rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.objective").getString(),
+                        rightX, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.from").getString(),
-                        rightX + 16, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX + 16, edY() + 46, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.to").getString(),
-                        rightX + 120, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX + 126, edY() + 46, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.empty_field").getString(),
-                        rightX, mainY + 68, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                        rightX, edY() + 68, VanillaUIHelper.TEXT_DARK_GRAY, false);
             }
             case "held_item" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.held_label").getString(),
-                        rightX, mainY + 4, VanillaUIHelper.TEXT_GRAY, false);
-                VanillaUIHelper.drawItemSlot(g, rightX + 4, mainY + 18, true);
+                        rightX, edY() + 4, VanillaUIHelper.TEXT_GRAY, false);
+                VanillaUIHelper.drawItemSlot(g, rightX + 4, edY() + 18, true);
                 if (heldItemId != null) {
-                    renderGhostItem(g, heldItemId, null, rightX + 5, mainY + 19);
+                    renderGhostItem(g, heldItemId, null, rightX + 5, edY() + 19);
                 }
                 VanillaUIHelper.drawSeparator(g, rightX, heldGridY() - 14, rightW - 8);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.inv_pick").getString(),
@@ -764,21 +854,23 @@ public class ConditionsEditorScreen extends ScaledScreen {
             case "items" -> renderItemsEditor(g, mouseX, mouseY);
             case "weather" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.weather_label").getString(),
-                        rightX, mainY + 4, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 4, VanillaUIHelper.TEXT_GRAY, false);
                 String[] st = {"clear", "rain", "thunder"};
                 for (int i = 0; i < 3; i++) {
-                    drawSmall(g, Component.translatable("wh_npcs.ui.conditions.weather_" + st[i]).getString(),
-                            rightX + i * 84, mainY + 20, 80, mouseX, mouseY,
-                            weatherState.equals(st[i]) ? VanillaUIHelper.TEXT_GOLD : VanillaUIHelper.TEXT_AQUA);
+                    boolean sel = weatherState.equals(st[i]);
+                    drawSmall(g, (sel ? "✔ " : "")
+                                    + Component.translatable("wh_npcs.ui.conditions.weather_" + st[i]).getString(),
+                            rightX + i * 84, edY() + 20, 80, mouseX, mouseY,
+                            sel ? VanillaUIHelper.TEXT_GOLD : VanillaUIHelper.TEXT_AQUA);
                 }
             }
             case "time" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.time_from").getString(),
-                        rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.time_to").getString(),
-                        rightX + 80, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX + 80, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.time_hint").getString(),
-                        rightX, mainY + 44, VanillaUIHelper.TEXT_WHITE, false);
+                        rightX, edY() + 44, VanillaUIHelper.TEXT_WHITE, false);
                 if (timeMinBox != null && isOver(mouseX, mouseY, timeMinBox.getX(), timeMinBox.getY(),
                         timeMinBox.getWidth(), timeMinBox.getHeight())) {
                     int t = hhmmToTicks(timeMinBox.getValue(), 0);
@@ -791,40 +883,43 @@ public class ConditionsEditorScreen extends ScaledScreen {
                 }
             }
             case "player_state" -> {
-                g.drawString(font, "§7HP:", rightX, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
-                g.drawString(font, "–", rightX + 78, mainY + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, "§7HP:", rightX, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, "–", rightX + 101, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.food_label").getString(),
-                        rightX, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
-                g.drawString(font, "–", rightX + 98, mainY + 46, VanillaUIHelper.TEXT_GRAY, false);
-                if (isOver(mouseX, mouseY, rightX, mainY + 16, 30, 12)) {
+                        rightX, edY() + 46, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, "–", rightX + 116, edY() + 46, VanillaUIHelper.TEXT_GRAY, false);
+                if (isOver(mouseX, mouseY, rightX, edY() + 16, 30, 12)) {
                     editorTooltip = Component.translatable("wh_npcs.ui.conditions.hp_tip").getString();
                 }
-                if (isOver(mouseX, mouseY, rightX, mainY + 44, 48, 12)) {
+                if (isOver(mouseX, mouseY, rightX, edY() + 44, 48, 12)) {
                     editorTooltip = Component.translatable("wh_npcs.ui.conditions.food_tip").getString();
                 }
                 drawSmall(g, Component.translatable("wh_npcs.ui.conditions.effmode_" + effectMode).getString(),
-                        rightX, mainY + 70, 180, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                        rightX, edY() + 70, 180, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
                 if (effectMode.equals("any") || effectMode.equals("all")) {
                     drawSmall(g, Component.translatable("wh_npcs.ui.conditions.effects_btn", draftEffects.size()).getString(),
-                            rightX + 186, mainY + 70, 120, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                            rightX + 186, edY() + 70, 120, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
                 }
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.empty_bound").getString(),
-                        rightX, mainY + 96, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                        rightX, edY() + 96, VanillaUIHelper.TEXT_DARK_GRAY, false);
             }
             default -> g.drawString(font,
                     Component.translatable("wh_npcs.ui.conditions.type_later", condition.type()).getString(),
-                    rightX, mainY + 18, VanillaUIHelper.TEXT_STATUS, false);
+                    rightX, edY() + 18, VanillaUIHelper.TEXT_STATUS, false);
+        }
+        if (!typePicker) {
+            for (var s : scrubs) {
+                s.render(g, font, mouseX, mouseY);
+            }
         }
     }
 
     private void renderItemsEditor(GuiGraphics g, int mouseX, int mouseY) {
-        g.drawString(font, Component.translatable("wh_npcs.ui.conditions.items_header").getString(),
-                rightX, mainY + 2, VanillaUIHelper.TEXT_GRAY, false);
         for (int i = 0; i < ItemsCondition.MAX_SLOTS; i++) {
             int x = colX(i);
 
             g.drawCenteredString(font,
-                    Component.translatable("wh_npcs.ui.conditions.slot_n", i + 1).getString(), x + 35, mainY + 14,
+                    Component.translatable("wh_npcs.ui.conditions.slot_n", i + 1).getString(), x + 35, itemsY() + 14,
                     i == activeSlot ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_DARK_GRAY);
 
             int slotX = x + 26;
@@ -837,9 +932,6 @@ public class ConditionsEditorScreen extends ScaledScreen {
             } else if (slotItem[i] != null) {
                 renderGhostItem(g, slotItem[i], slotNbt[i], slotX + 1, slotRowY() + 1);
             }
-
-            g.drawString(font, Component.translatable("wh_npcs.ui.conditions.pcs").getString(),
-                    x + 52, countY() + 3, VanillaUIHelper.TEXT_DARK_GRAY, false);
 
             String modeLabel = switch (slotMode[i]) {
                 case IGNORE -> Component.translatable("wh_npcs.ui.conditions.nbt_ignore").getString();
@@ -951,7 +1043,7 @@ public class ConditionsEditorScreen extends ScaledScreen {
         for (String line : text.split("\n")) {
             lines.add(Component.literal(line));
         }
-        g.renderComponentTooltip(font, lines, x, y);
+        queueTooltip(lines);
     }
 
     private void drawSmall(GuiGraphics g, String label, int x, int y, int w,
@@ -991,9 +1083,17 @@ public class ConditionsEditorScreen extends ScaledScreen {
             return true;
         }
         if (button == 0) {
-
+            if (scrollbars.click(mouseX, mouseY)) {
+                return true;
+            }
+            for (var s : scrubs) {
+                if (s.mouseClicked(mouseX, mouseY, button)) {
+                    return true;
+                }
+            }
+            int visible = visibleConditionRows();
             int y = leftY + 4;
-            for (int i = 0; i < conditions.size(); i++) {
+            for (int i = listScroll; i < Math.min(conditions.size(), listScroll + visible); i++) {
                 if (isOver(mouseX, mouseY, leftX + 2, y, LEFT_W - 4, ROW_H)) {
                     if (isOver(mouseX, mouseY, leftX + LEFT_W - 16, y, 14, ROW_H)) {
                         conditions.remove(i);
@@ -1032,6 +1132,11 @@ public class ConditionsEditorScreen extends ScaledScreen {
                 return true;
             }
         } else if (button == 1) {
+            for (var s : scrubs) {
+                if (s.mouseClicked(mouseX, mouseY, button)) {
+                    return true;
+                }
+            }
             if (handleEditorClick(mouseX, mouseY, true)) {
                 return true;
             }
@@ -1043,6 +1148,39 @@ public class ConditionsEditorScreen extends ScaledScreen {
         return superMouseClicked(mouseX, mouseY, button);
     }
 
+    @Override
+    protected boolean mouseScrolledScaled(double mouseX, double mouseY, double delta) {
+        recalc();
+        if (!typePicker && isOver(mouseX, mouseY, leftX, leftY, LEFT_W, leftH)) {
+            listScroll = Math.max(0, Math.min(listScroll - (int) Math.signum(delta),
+                    Math.max(0, conditions.size() - visibleConditionRows())));
+            return true;
+        }
+        return superMouseScrolled(mouseX, mouseY, delta);
+    }
+
+    @Override
+    protected boolean mouseDraggedScaled(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (scrollbars.drag(mouseY)) {
+            return true;
+        }
+        for (var s : scrubs) {
+            if (s.mouseDragged(mouseX, mouseY, button)) {
+                return true;
+            }
+        }
+        return superMouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    @Override
+    protected boolean mouseReleasedScaled(double mouseX, double mouseY, int button) {
+        scrollbars.release();
+        for (var s : scrubs) {
+            s.mouseReleased();
+        }
+        return superMouseReleased(mouseX, mouseY, button);
+    }
+
     private boolean handleEditorClick(double mouseX, double mouseY, boolean rightClick) {
         DialogueCondition condition = current();
         if (condition == null) {
@@ -1050,14 +1188,14 @@ public class ConditionsEditorScreen extends ScaledScreen {
         }
         switch (condition.type()) {
             case "flag" -> {
-                if (!rightClick && isOver(mouseX, mouseY, rightX, mainY + 42, 160, 18)) {
+                if (!rightClick && isOver(mouseX, mouseY, rightX, edY() + 42, 160, 18)) {
                     flagValue = !flagValue;
                     writeBack();
                     return true;
                 }
             }
             case "var_equals" -> {
-                if (!rightClick && isOver(mouseX, mouseY, rightX, mainY + 70, 160, 18)) {
+                if (!rightClick && isOver(mouseX, mouseY, rightX, edY() + 70, 160, 18)) {
                     varIgnoreCase = !varIgnoreCase;
                     writeBack();
                     return true;
@@ -1115,7 +1253,7 @@ public class ConditionsEditorScreen extends ScaledScreen {
                 if (!rightClick) {
                     String[] st = {"clear", "rain", "thunder"};
                     for (int i = 0; i < 3; i++) {
-                        if (isOver(mouseX, mouseY, rightX + i * 84, mainY + 20, 80, 18)) {
+                        if (isOver(mouseX, mouseY, rightX + i * 84, edY() + 20, 80, 18)) {
                             weatherState = st[i];
                             writeBack();
                             return true;
@@ -1124,7 +1262,7 @@ public class ConditionsEditorScreen extends ScaledScreen {
                 }
             }
             case "player_state" -> {
-                if (!rightClick && isOver(mouseX, mouseY, rightX, mainY + 70, 180, 18)) {
+                if (!rightClick && isOver(mouseX, mouseY, rightX, edY() + 70, 180, 18)) {
                     String[] modes = {"off", "any", "all", "any_effect", "no_effect"};
                     int idx = 0;
                     for (int i = 0; i < modes.length; i++) {
@@ -1137,7 +1275,7 @@ public class ConditionsEditorScreen extends ScaledScreen {
                     return true;
                 }
                 if (!rightClick && (effectMode.equals("any") || effectMode.equals("all"))
-                        && isOver(mouseX, mouseY, rightX + 186, mainY + 70, 120, 18) && minecraft != null) {
+                        && isOver(mouseX, mouseY, rightX + 186, edY() + 70, 120, 18) && minecraft != null) {
                     minecraft.setScreen(new EffectPickerScreen(this, draftEffects, this::writeBack));
                     return true;
                 }

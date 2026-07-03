@@ -155,9 +155,13 @@ public class GlobalScheduleScreen extends ScaledScreen {
 
     @Override
     protected boolean mouseScrolledScaled(double mouseX, double mouseY, double delta) {
-        scroll = Math.max(0, Math.min(scroll - (int) Math.signum(delta),
-                Math.max(0, ClientGlobalSchedule.get().size() - MAX_ROWS)));
-        return true;
+        recalc();
+        if (isOver(mouseX, mouseY, winX, listTop, winW, MAX_ROWS * ROW_H)) {
+            scroll = Math.max(0, Math.min(scroll - (int) Math.signum(delta),
+                    Math.max(0, ClientGlobalSchedule.get().size() - MAX_ROWS)));
+            return true;
+        }
+        return superMouseScrolled(mouseX, mouseY, delta);
     }
 
     @Override
@@ -168,9 +172,7 @@ public class GlobalScheduleScreen extends ScaledScreen {
     }
 
     private void drawBtn(GuiGraphics g, String label, int x, int y, int w, int mouseX, int mouseY, int color) {
-        boolean hovered = isOver(mouseX, mouseY, x, y, w, 18);
-        VanillaUIHelper.drawButton(g, x, y, w, 18, hovered);
-        g.drawCenteredString(font, label, x + w / 2, y + 5, hovered ? VanillaUIHelper.TEXT_YELLOW : color);
+        VanillaUIHelper.drawSmallButton(g, font, label, x, y, w, isOver(mouseX, mouseY, x, y, w, 18), color);
     }
 
     private static boolean isOver(double mx, double my, int x, int y, int w, int h) {

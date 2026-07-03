@@ -27,7 +27,9 @@ public class RequestSkinPacket {
         ServerPlayer sender = ctx.get().getSender();
         if (sender != null) {
             String name = packet.skinName;
-            SkinService.get().forget(name);
+            if (sender.hasPermissions(2)) {
+                SkinService.get().forget(name);
+            }
             SkinService.get().fetch(name).whenComplete((data, err) -> sender.server.execute(() -> {
                 if (err != null || data == null) {
 

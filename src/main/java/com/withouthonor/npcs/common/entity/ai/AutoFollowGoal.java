@@ -77,6 +77,7 @@ public class AutoFollowGoal extends Goal {
     public void stop() {
         this.target = null;
         this.navigation.stop();
+        npc.setSprinting(false);
     }
 
     @Override

@@ -2,6 +2,7 @@ package com.withouthonor.npcs.compat.epicfight;
 
 import com.withouthonor.npcs.common.entity.CompanionEntity;
 import net.minecraftforge.event.entity.living.LivingEvent;
+import net.minecraftforge.fml.loading.FMLEnvironment;
 import yesman.epicfight.api.animation.Animator;
 import yesman.epicfight.world.capabilities.entitypatch.Factions;
 import yesman.epicfight.world.capabilities.entitypatch.HumanoidMobPatch;
@@ -14,6 +15,11 @@ public class CompanionMobPatch extends HumanoidMobPatch<CompanionEntity> {
 
     @Override
     public boolean overrideRender() {
+        // Клиентский класс нельзя резолвить на дедике — только за dist-гардом.
+        return FMLEnvironment.dist.isClient() && clientOverrideRender();
+    }
+
+    private boolean clientOverrideRender() {
         return EpicFightClientCompat.isEpicFightRendered(this.getOriginal());
     }
 

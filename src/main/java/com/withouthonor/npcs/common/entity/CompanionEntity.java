@@ -140,6 +140,7 @@ public class CompanionEntity extends PathfinderMob
     private int cfgTotemCharges;
     private boolean cfgTotemRender;
     private int totemUsesLeft;
+    private int appliedTotemCharges;
     private int cfgShieldHoldTicks = 30;
     private int cfgShieldCooldownTicks = 40;
     private net.minecraft.world.entity.MobType cfgMobType = net.minecraft.world.entity.MobType.UNDEFINED;
@@ -504,15 +505,26 @@ public class CompanionEntity extends PathfinderMob
         this.profileId = profileId;
     }
 
+    /** Профиль создан спавнером только для этого NPC — удаляется вместе с ним. */
+    private boolean transientProfile;
+
+    public void setTransientProfile(boolean value) {
+        this.transientProfile = value;
+    }
+
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
         if (profileId != null) {
             tag.putUUID(TAG_PROFILE_ID, profileId);
         }
+        if (transientProfile) {
+            tag.putBoolean("TransientProfile", true);
+        }
         if (followTargetId != null
                 && (followMode == com.withouthonor.npcs.common.entity.ai.FollowMode.FOLLOW
-                || followMode == com.withouthonor.npcs.common.entity.ai.FollowMode.WAIT)) {
+                || followMode == com.withouthonor.npcs.common.entity.ai.FollowMode.WAIT
+                || followMode == com.withouthonor.npcs.common.entity.ai.FollowMode.RETURN)) {
             tag.putUUID(TAG_FOLLOW, followTargetId);
             tag.putByte("FollowMode", (byte) followMode.ordinal());
             if (followReturnPos != null) {
@@ -543,6 +555,10 @@ public class CompanionEntity extends PathfinderMob
         if (!getArrowItem().isEmpty()) {
             tag.put("ArrowItem", getArrowItem().save(new CompoundTag()));
         }
+        if (cfgTotemCharges > 0) {
+            tag.putInt("TotemUsesLeft", totemUsesLeft);
+            tag.putInt("TotemCharges", cfgTotemCharges);
+        }
 
         if (com.withouthonor.npcs.compat.Compat.curiosLoaded()) {
             net.minecraft.nbt.ListTag curios = new net.minecraft.nbt.ListTag();
@@ -568,6 +584,7 @@ public class CompanionEntity extends PathfinderMob
         if (tag.hasUUID(TAG_PROFILE_ID)) {
             profileId = tag.getUUID(TAG_PROFILE_ID);
         }
+        transientProfile = tag.getBoolean("TransientProfile");
         if (tag.hasUUID(TAG_FOLLOW)) {
             followTargetId = tag.getUUID(TAG_FOLLOW);
             com.withouthonor.npcs.common.entity.ai.FollowMode[] modes =
@@ -594,6 +611,10 @@ public class CompanionEntity extends PathfinderMob
         setArrowItem(tag.contains("ArrowItem")
                 ? net.minecraft.world.item.ItemStack.of(tag.getCompound("ArrowItem"))
                 : net.minecraft.world.item.ItemStack.EMPTY);
+        if (tag.contains("TotemUsesLeft")) {
+            totemUsesLeft = tag.getInt("TotemUsesLeft");
+            appliedTotemCharges = tag.getInt("TotemCharges");
+        }
 
         pendingCurios = tag.contains("WhCurios")
                 ? tag.getList("WhCurios", net.minecraft.nbt.Tag.TAG_COMPOUND) : null;
@@ -1099,7 +1120,10 @@ public class CompanionEntity extends PathfinderMob
         this.entityData.set(DATA_PASSABLE, profile.isPassable());
         this.cfgTotemCharges = profile.getTotemCharges();
         this.cfgTotemRender = profile.isTotemRender();
-        this.totemUsesLeft = this.cfgTotemCharges;
+        if (this.cfgTotemCharges != this.appliedTotemCharges) {
+            this.appliedTotemCharges = this.cfgTotemCharges;
+            this.totemUsesLeft = this.cfgTotemCharges;
+        }
         updateTotemArmed();
         this.cfgShieldHoldTicks = Math.round(profile.getShieldHoldSeconds() * 20.0F);
         this.cfgShieldCooldownTicks = Math.round(profile.getShieldCooldownSeconds() * 20.0F);
@@ -1479,15 +1503,16 @@ public class CompanionEntity extends PathfinderMob
         if (isAggressive()) {
             return InteractionResult.PASS;
         }
+        // Общая для обеих сторон: иначе клиент вернёт SUCCESS и предмет
+        // не получит interactLivingEntity на клиенте (рассинхрон замаха).
+        if ((player.getItemInHand(hand).getItem()
+                instanceof com.withouthonor.npcs.common.item.MemorionFeatherItem
+                || player.getItemInHand(hand).getItem()
+                instanceof com.withouthonor.npcs.common.item.NpcMoverItem)
+                && player.hasPermissions(2)) {
+            return InteractionResult.PASS;
+        }
         if (player instanceof ServerPlayer serverPlayer) {
-
-            if ((serverPlayer.getItemInHand(hand).getItem()
-                    instanceof com.withouthonor.npcs.common.item.MemorionFeatherItem
-                    || serverPlayer.getItemInHand(hand).getItem()
-                    instanceof com.withouthonor.npcs.common.item.NpcMoverItem)
-                    && serverPlayer.hasPermissions(2)) {
-                return InteractionResult.PASS;
-            }
 
             if (serverPlayer.isShiftKeyDown() && isFollowingPlayer(serverPlayer)) {
                 waitHere();
@@ -2282,6 +2307,10 @@ public class CompanionEntity extends PathfinderMob
                 MinecraftServer server = level().getServer();
                 if (server != null) {
                     CompanionIndex.get(server).remove(getUUID());
+                    com.withouthonor.npcs.common.storage.GlobalScheduleManager.get(server).forget(server, getUUID());
+                    if (transientProfile && profileId != null) {
+                        ProfileManager.get().delete(profileId);
+                    }
                 }
             }
         }

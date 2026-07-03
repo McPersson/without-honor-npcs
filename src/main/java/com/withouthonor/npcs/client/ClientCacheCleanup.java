@@ -22,6 +22,12 @@ public final class ClientCacheCleanup {
         ClientBubbles.remove(id);
         ClientEmotes.remove(id);
         ClientIndicators.remove(id);
+        com.withouthonor.npcs.client.render.CompanionOverlays.INSTANCE.clearEntity(id);
+        if (com.withouthonor.npcs.compat.Compat.emotecraftLoaded()
+                && com.withouthonor.npcs.compat.Compat.emotecraft()
+                        instanceof com.withouthonor.npcs.compat.emotecraft.EmotecraftBridgeImpl emote) {
+            emote.onEntityUnload(id);
+        }
     }
 
     @SubscribeEvent
@@ -30,6 +36,12 @@ public final class ClientCacheCleanup {
             ClientBubbles.clear();
             ClientEmotes.clear();
             ClientIndicators.clear();
+            com.withouthonor.npcs.client.render.CompanionOverlays.INSTANCE.clearAll();
+            if (com.withouthonor.npcs.compat.Compat.emotecraftLoaded()
+                    && com.withouthonor.npcs.compat.Compat.emotecraft()
+                            instanceof com.withouthonor.npcs.compat.emotecraft.EmotecraftBridgeImpl emote) {
+                emote.clearLayers();
+            }
         }
     }
 }

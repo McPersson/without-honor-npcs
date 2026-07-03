@@ -6,7 +6,6 @@ import com.withouthonor.npcs.client.gui.SelectableEditBox;
 import com.withouthonor.npcs.client.gui.VanillaUIHelper;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
@@ -42,6 +41,11 @@ public class CombatPresetScreen extends ScaledScreen {
     private int listTop, descTop, optTop, bottomY;
     @Nullable
     private String hoverTooltip;
+    @Nullable
+    private String intervalTipKey, rangeTipKey, speedTipKey, leapTipKey;
+    @Nullable
+    private String[] descCache;
+    private int descCacheIdx = -1;
 
     public CombatPresetScreen(@Nullable Screen parent, JsonObject profileJson) {
         super(Component.translatable("wh_npcs.ui.combat_preset.title"));
@@ -66,9 +70,7 @@ public class CombatPresetScreen extends ScaledScreen {
         winY = (height - winH) / 2;
         listTop = winY + HEADER_H + 8;
         descTop = listTop + NpcEditorScreen.PRESET_IDS.length * ROW_H + 8;
-        int descLines = Component.translatable(NpcEditorScreen.PRESET_DESC_KEYS[presetIdx()])
-                .getString().split("\n").length;
-        optTop = descTop + Math.max(38, descLines * 10 + 6);
+        optTop = descTop + Math.max(38, descLines(presetIdx()).length * 10 + 6);
         bottomY = winY + winH - PAD - 20;
     }
 
@@ -80,32 +82,53 @@ public class CombatPresetScreen extends ScaledScreen {
         this.rangeBox = null;
         this.speedBox = null;
         this.leapBox = null;
+        this.intervalTipKey = null;
+        this.rangeTipKey = null;
+        this.speedTipKey = null;
+        this.leapTipKey = null;
 
         int by = optTop + 14 + 3 * 16 + 16 + 4;
         String p = preset();
         if ("bow".equals(p)) {
             intervalBox = numBox(winX + PAD + 78, by, 40, "ranged_interval_s", 1.25F, 0.3F, 10.0F);
-            intervalBox.setTooltip(Tooltip.create(Component.translatable("wh_npcs.ui.combat_preset.tip.bow_interval")));
+            intervalTipKey = "wh_npcs.ui.combat_preset.tip.bow_interval";
             rangeBox = numBox(winX + PAD + 196, by, 40, "ranged_range", 16.0F, 4.0F, 32.0F);
-            rangeBox.setTooltip(Tooltip.create(Component.translatable("wh_npcs.ui.combat_preset.tip.bow_range")));
+            rangeTipKey = "wh_npcs.ui.combat_preset.tip.bow_range";
         } else if ("potion".equals(p)) {
             intervalBox = numBox(winX + PAD + 78, by, 40, "potion_interval_s", 3.0F, 0.5F, 10.0F);
-            intervalBox.setTooltip(Tooltip.create(Component.translatable("wh_npcs.ui.combat_preset.tip.potion_interval")));
+            intervalTipKey = "wh_npcs.ui.combat_preset.tip.potion_interval";
             rangeBox = numBox(winX + PAD + 196, by, 40, "potion_range", 10.0F, 4.0F, 32.0F);
-            rangeBox.setTooltip(Tooltip.create(Component.translatable("wh_npcs.ui.combat_preset.tip.potion_range")));
+            rangeTipKey = "wh_npcs.ui.combat_preset.tip.potion_range";
         } else if ("melee".equals(p)) {
             speedBox = numBox(winX + PAD + 110, by, 40, "melee_chase_speed", 1.2F, 0.5F, 2.0F);
-            speedBox.setTooltip(Tooltip.create(Component.translatable("wh_npcs.ui.combat_preset.tip.melee_speed")));
+            speedTipKey = "wh_npcs.ui.combat_preset.tip.melee_speed";
             if (leapEnabled()) {
                 leapBox = numBox(winX + PAD + 240, by, 40, "leap_strength", 0.4F, 0.1F, 1.0F);
-                leapBox.setTooltip(Tooltip.create(Component.translatable("wh_npcs.ui.combat_preset.tip.leap_strength")));
+                leapTipKey = "wh_npcs.ui.combat_preset.tip.leap_strength";
             }
         } else if ("shield".equals(p)) {
             intervalBox = numBox(winX + PAD + 96, by, 40, "shield_hold_s", 1.5F, 0.3F, 5.0F);
-            intervalBox.setTooltip(Tooltip.create(Component.translatable("wh_npcs.ui.combat_preset.tip.shield_hold")));
+            intervalTipKey = "wh_npcs.ui.combat_preset.tip.shield_hold";
             rangeBox = numBox(winX + PAD + 214, by, 40, "shield_cooldown_s", 2.0F, 0.5F, 10.0F);
-            rangeBox.setTooltip(Tooltip.create(Component.translatable("wh_npcs.ui.combat_preset.tip.shield_cooldown")));
+            rangeTipKey = "wh_npcs.ui.combat_preset.tip.shield_cooldown";
         }
+    }
+
+    private String[] descLines(int idx) {
+        if (descCache == null || descCacheIdx != idx) {
+            descCache = Component.translatable(NpcEditorScreen.PRESET_DESC_KEYS[idx]).getString().split("\n");
+            descCacheIdx = idx;
+        }
+        return descCache;
+    }
+
+    @Nullable
+    private String boxTip(@Nullable EditBox box, @Nullable String key, int mouseX, int mouseY) {
+        if (box != null && key != null
+                && isOver(mouseX, mouseY, box.getX(), box.getY(), box.getWidth(), box.getHeight())) {
+            return Component.translatable(key).getString();
+        }
+        return null;
     }
 
     private boolean leapEnabled() {
@@ -167,12 +190,24 @@ public class CombatPresetScreen extends ScaledScreen {
         }
 
         g.fill(winX + 6, descTop - 5, winX + winW - 6, descTop - 4, 0xFF373737);
-        String[] desc = Component.translatable(NpcEditorScreen.PRESET_DESC_KEYS[idx]).getString().split("\n");
+        String[] desc = descLines(idx);
         for (int line = 0; line < desc.length; line++) {
             g.drawString(font, "§7" + desc[line], winX + PAD, descTop + line * 10, VanillaUIHelper.TEXT_WHITE, false);
         }
 
         String tooltip = renderOptions(g, NpcEditorScreen.PRESET_IDS[idx], mouseX, mouseY);
+        if (tooltip == null) {
+            tooltip = boxTip(intervalBox, intervalTipKey, mouseX, mouseY);
+        }
+        if (tooltip == null) {
+            tooltip = boxTip(rangeBox, rangeTipKey, mouseX, mouseY);
+        }
+        if (tooltip == null) {
+            tooltip = boxTip(speedBox, speedTipKey, mouseX, mouseY);
+        }
+        if (tooltip == null) {
+            tooltip = boxTip(leapBox, leapTipKey, mouseX, mouseY);
+        }
 
         drawBtn(g, Component.translatable("wh_npcs.ui.common.done").getString(), winX + winW - PAD - 80, bottomY, 80, mouseX, mouseY, VanillaUIHelper.TEXT_GREEN);
         hoverTooltip = tooltip;
@@ -235,8 +270,11 @@ public class CombatPresetScreen extends ScaledScreen {
         if ("bow".equals(preset)) {
             g.drawString(font, Component.translatable("wh_npcs.ui.combat_preset.shot_s").getString(), x, by + 4, VanillaUIHelper.TEXT_GRAY, false);
             g.drawString(font, Component.translatable("wh_npcs.ui.combat_preset.range_short").getString(), x + 126, by + 4, VanillaUIHelper.TEXT_GRAY, false);
-            g.drawString(font, Component.translatable("wh_npcs.ui.combat_preset.arrows_note").getString(),
-                    x, by + 24, VanillaUIHelper.TEXT_WHITE, false);
+            int ny = by + 24;
+            for (String line : Component.translatable("wh_npcs.ui.combat_preset.arrows_note").getString().split("\n")) {
+                g.drawString(font, line, x, ny, VanillaUIHelper.TEXT_WHITE, false);
+                ny += 10;
+            }
         } else if ("potion".equals(preset)) {
             g.drawString(font, Component.translatable("wh_npcs.ui.combat_preset.throw_s").getString(), x, by + 4, VanillaUIHelper.TEXT_GRAY, false);
             g.drawString(font, Component.translatable("wh_npcs.ui.combat_preset.range_short").getString(), x + 126, by + 4, VanillaUIHelper.TEXT_GRAY, false);
@@ -322,13 +360,11 @@ public class CombatPresetScreen extends ScaledScreen {
         for (String line : text.split("\n")) {
             lines.add(Component.literal(line));
         }
-        g.renderComponentTooltip(font, lines, mouseX, mouseY);
+        queueTooltip(lines);
     }
 
     private void drawBtn(GuiGraphics g, String label, int x, int y, int w, int mouseX, int mouseY, int color) {
-        boolean hovered = isOver(mouseX, mouseY, x, y, w, 18);
-        VanillaUIHelper.drawButton(g, x, y, w, 18, hovered);
-        g.drawCenteredString(font, label, x + w / 2, y + 5, hovered ? VanillaUIHelper.TEXT_YELLOW : color);
+        VanillaUIHelper.drawSmallButton(g, font, label, x, y, w, isOver(mouseX, mouseY, x, y, w, 18), color);
     }
 
     private static boolean isOver(double mx, double my, int x, int y, int w, int h) {

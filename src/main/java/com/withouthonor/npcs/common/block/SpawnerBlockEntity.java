@@ -179,6 +179,8 @@ public class SpawnerBlockEntity extends BlockEntity {
         if (spawnOne(level, pos)) {
             cooldown = delaySeconds * 20;
             setChanged();
+        } else {
+            cooldown = 100;
         }
     }
 
@@ -209,6 +211,7 @@ public class SpawnerBlockEntity extends BlockEntity {
             npc.setYBodyRot(yaw);
             npc.setYHeadRot(yaw);
             npc.setProfileId(profile.getId());
+            npc.setTransientProfile(true);
             npc.setCustomName(Component.literal(json.has("name") ? json.get("name").getAsString() : "NPC"));
             level.addFreshEntity(npc);
             spawned.add(npc.getUUID());

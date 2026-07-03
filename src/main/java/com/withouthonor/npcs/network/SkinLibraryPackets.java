@@ -271,6 +271,10 @@ public final class SkinLibraryPackets {
 
         private static final Map<UUID, Buf> BUFFERS = new HashMap<>();
 
+        public static void onLogout(UUID playerId) {
+            BUFFERS.remove(playerId);
+        }
+
         private final String name;
         private final int index;
         private final int total;
@@ -332,6 +336,12 @@ public final class SkinLibraryPackets {
             }
             buf.chunks.add(p.chunk);
             buf.size += p.chunk.length;
+            if (buf.size > SkinService.MAX_SKIN_BYTES) {
+                BUFFERS.remove(id);
+                sender.sendSystemMessage(Component.translatable("wh_npcs.msg.skin.too_big")
+                        .withStyle(ChatFormatting.RED));
+                return;
+            }
             if (buf.chunks.size() < buf.total) {
                 return;
             }
