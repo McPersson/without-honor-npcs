@@ -8,7 +8,7 @@ Everything happens in-game. Grab the Memorion Feather, right-click an NPC, and a
 editor opens up: dialogue trees, shops, reputation, combat, poses, schedules - all
 through a clean (almost :D) GUI.
 
-A Minecraft **Forge 1.20.1** mod. Currently in **beta (0.9.2)**.
+A Minecraft **Forge 1.20.1** mod. Currently in **beta (0.9.3)**.
 
 **Download:** [Modrinth](https://modrinth.com/mod/without-honor-npcs) · [CurseForge](https://www.curseforge.com/minecraft/mc-mods/without-honor-npcs) - **Report a bug:** [Issues](../../issues)
 
