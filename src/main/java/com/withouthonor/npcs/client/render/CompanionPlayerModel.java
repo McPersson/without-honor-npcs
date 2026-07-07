@@ -15,7 +15,8 @@ public class CompanionPlayerModel extends PlayerModel<CompanionEntity> {
     public void setupAnim(CompanionEntity entity, float limbSwing, float limbSwingAmount,
                           float ageInTicks, float netHeadYaw, float headPitch) {
 
-        this.riding = entity.isSitting();
+        // Ваниль уже выставила riding для пассажиров (лодка и т.п.) — не перетирать
+        this.riding = entity.isSitting() || this.riding;
         super.setupAnim(entity, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch);
         applyPose(entity);
         reapplyAimArms(entity);

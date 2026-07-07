@@ -57,7 +57,16 @@ public class EditorDataPacket {
         this.siblingCount = siblingCount;
     }
 
-    public static List<DialogueSummary> buildSummaries() {
+    public static List<DialogueSummary> buildSummaries(net.minecraft.server.MinecraftServer server) {
+        // «Использовано» считаем только по NPC, реально стоящим в мире (индекс), а не по всем профилям
+        java.util.Set<java.util.UUID> worldProfileIds = new java.util.HashSet<>();
+        if (server != null) {
+            for (var e : com.withouthonor.npcs.common.storage.CompanionIndex.get(server).all()) {
+                if (e.profileId() != null) {
+                    worldProfileIds.add(e.profileId());
+                }
+            }
+        }
         List<DialogueSummary> summaries = new ArrayList<>();
         for (String id : DialogueManager.get().ids().stream().sorted().toList()) {
             DialogueGraph graph = DialogueManager.get().get(id);
@@ -67,6 +76,9 @@ public class EditorDataPacket {
             List<String> usedBy = new ArrayList<>();
             int extra = 0;
             for (CompanionProfile p : ProfileManager.get().all()) {
+                if (!worldProfileIds.contains(p.getId())) {
+                    continue;
+                }
                 boolean uses = false;
                 for (EntryPoint entry : p.getEntryPoints()) {
                     if (id.equals(entry.getDialogueId())) {
@@ -93,7 +105,7 @@ public class EditorDataPacket {
     public static void send(ServerPlayer player, CompanionProfile profile, int entityId) {
         DialogueManager.get().loadMissing();
         byte[] json = profile.toJson().toString().getBytes(StandardCharsets.UTF_8);
-        List<DialogueSummary> summaries = buildSummaries();
+        List<DialogueSummary> summaries = buildSummaries(player.server);
         List<FactionInfo> factions = new ArrayList<>();
         for (var faction : com.withouthonor.npcs.common.reputation.FactionRegistry.get().all()) {
             factions.add(new FactionInfo(faction.getId(), faction.getName(), faction.getColor()));

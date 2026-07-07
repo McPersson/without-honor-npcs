@@ -24,7 +24,7 @@ public class RefreshDialoguesPacket {
         if (sender != null && sender.hasPermissions(2)) {
             DialogueManager.get().reload();
             NetworkHandler.sendToPlayer(
-                    new DialogueListPacket(EditorDataPacket.buildSummaries()), sender);
+                    new DialogueListPacket(EditorDataPacket.buildSummaries(sender.server)), sender);
         }
         ctx.get().setPacketHandled(true);
     }

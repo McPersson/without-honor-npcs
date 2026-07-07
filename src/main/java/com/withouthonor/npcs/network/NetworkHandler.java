@@ -567,6 +567,12 @@ public class NetworkHandler {
                 .decoder(NpcListPackets.Result::decode)
                 .consumerMainThread(NpcListPackets.Result::handle)
                 .add();
+
+        CHANNEL.messageBuilder(NpcFacePlayerPacket.class, packetId++, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(NpcFacePlayerPacket::encode)
+                .decoder(NpcFacePlayerPacket::decode)
+                .consumerMainThread(NpcFacePlayerPacket::handle)
+                .add();
     }
 
     public static void sendToPlayer(Object packet, ServerPlayer player) {

@@ -59,7 +59,7 @@ public class FollowPlayerGoal extends Goal {
     @Override
     public boolean canUse() {
         Player p = npc.getFollowTarget();
-        if (p == null || p.isSpectator()) {
+        if (p == null || p.isSpectator() || npc.isPassenger()) {
             return false;
         }
         FollowMode mode = npc.getFollowMode();
@@ -80,7 +80,7 @@ public class FollowPlayerGoal extends Goal {
     @Override
     public boolean canContinueToUse() {
         Player p = npc.getFollowTarget();
-        if (p == null || p != this.target || p.isSpectator()) {
+        if (p == null || p != this.target || p.isSpectator() || npc.isPassenger()) {
             return false;
         }
         FollowMode mode = npc.getFollowMode();

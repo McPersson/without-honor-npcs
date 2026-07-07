@@ -78,6 +78,6 @@ public class RenameDialoguePacket {
 
         sender.sendSystemMessage(Component.translatable("wh_npcs.msg.dialogue.renamed", oldId, newId)
                 .withStyle(ChatFormatting.GREEN));
-        NetworkHandler.sendToPlayer(new DialogueListPacket(EditorDataPacket.buildSummaries()), sender);
+        NetworkHandler.sendToPlayer(new DialogueListPacket(EditorDataPacket.buildSummaries(sender.server)), sender);
     }
 }

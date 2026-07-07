@@ -178,7 +178,13 @@ public class CompanionProfile {
     private boolean scheduleEnabled;
     private boolean scheduleGlobal;
 
-    private boolean idleLook = true;
+    /** Режим взгляда: "off" / "cold" (ваниль LookAt) / "lively" (следит корпусом). */
+    private String lookMode = "cold";
+
+    /** Радиус «живого» взгляда в блоках (1..16). */
+    private int lookRadius = 3;
+
+    private boolean boatRide = true;
 
     private boolean idleWander;
 
@@ -822,7 +828,19 @@ public class CompanionProfile {
     }
 
     public boolean isIdleLook() {
-        return idleLook;
+        return !"off".equals(lookMode);
+    }
+
+    public String getLookMode() {
+        return lookMode;
+    }
+
+    public int getLookRadius() {
+        return lookRadius;
+    }
+
+    public boolean isBoatRide() {
+        return boatRide;
     }
 
     public boolean isIdleWander() {
@@ -1228,7 +1246,17 @@ public class CompanionProfile {
         }
         profile.scheduleEnabled = json.has("schedule_enabled") && json.get("schedule_enabled").getAsBoolean();
         profile.scheduleGlobal = json.has("schedule_global") && json.get("schedule_global").getAsBoolean();
-        profile.idleLook = !json.has("idle_look") || json.get("idle_look").getAsBoolean();
+        if (json.has("look_mode")) {
+            profile.lookMode = json.get("look_mode").getAsString();
+        } else {
+            // Миграция со старого флага idle_look: true → "cold", false → "off"
+            profile.lookMode = !json.has("idle_look") || json.get("idle_look").getAsBoolean()
+                    ? "cold" : "off";
+        }
+        if (json.has("look_radius")) {
+            profile.lookRadius = Math.max(1, Math.min(16, json.get("look_radius").getAsInt()));
+        }
+        profile.boatRide = !json.has("boat_ride") || json.get("boat_ride").getAsBoolean();
         profile.pursueAttacker = !json.has("pursue_attacker") || json.get("pursue_attacker").getAsBoolean();
         profile.holdPosition = json.has("hold_position") && json.get("hold_position").getAsBoolean();
         profile.idleWander = json.has("idle_wander") && json.get("idle_wander").getAsBoolean();
@@ -1468,8 +1496,18 @@ public class CompanionProfile {
         if (scheduleEnabled) {
             json.addProperty("schedule_enabled", true);
         }
-        if (!idleLook) {
+        if (!"cold".equals(lookMode)) {
+            json.addProperty("look_mode", lookMode);
+        }
+        if ("off".equals(lookMode)) {
+            // Легаси-флаг для совместимости старых версий/экспорта
             json.addProperty("idle_look", false);
+        }
+        if (lookRadius != 3) {
+            json.addProperty("look_radius", lookRadius);
+        }
+        if (!boatRide) {
+            json.addProperty("boat_ride", false);
         }
         if (idleWander) {
             json.addProperty("idle_wander", true);

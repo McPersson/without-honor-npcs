@@ -15,19 +15,29 @@ public class BehaviorTraitsScreen extends ScaledScreen {
 
     private static final int PAD = 8;
     private static final int HEADER_H = 22;
+    /** Единый шаг сетки строк. */
+    private static final int ROW = 24;
+    /** Отступ вложенных строк-параметров (радиусы). */
+    private static final int INDENT = 12;
     private static final String[] MODES = {"none", "player", "entity"};
     private static final String[] MODE_LABEL_KEYS = {"wh_npcs.ui.behavior.follow.none",
             "wh_npcs.ui.behavior.follow.player", "wh_npcs.ui.behavior.follow.entity"};
+    private static final String[] LOOK_MODES = {"off", "cold", "lively"};
+    private static final String[] LOOK_LABEL_KEYS = {"wh_npcs.ui.behavior.look.off",
+            "wh_npcs.ui.behavior.look.cold", "wh_npcs.ui.behavior.look.lively"};
 
     private final Screen parent;
     private final JsonObject profileJson;
 
-    private boolean idleLook, idleWander, panic, avoidSun, burnInSun, pushable, passable;
+    private boolean idleWander, panic, avoidSun, burnInSun, pushable, passable, boatRide;
+    private String lookMode;
     private String autoMode;
     @Nullable
     private EditBox autoTargetBox;
     @Nullable
     private EditBox wanderRadiusBox;
+    @Nullable
+    private EditBox lookRadiusBox;
 
     private int winX, winY, winW, winH;
     private int top, bottomY;
@@ -38,7 +48,14 @@ public class BehaviorTraitsScreen extends ScaledScreen {
         super(Component.translatable("wh_npcs.ui.behavior.title"));
         this.parent = parent;
         this.profileJson = profileJson;
-        this.idleLook = !profileJson.has("idle_look") || profileJson.get("idle_look").getAsBoolean();
+        if (profileJson.has("look_mode")) {
+            this.lookMode = profileJson.get("look_mode").getAsString();
+        } else {
+            // Миграция со старого флага idle_look
+            this.lookMode = !profileJson.has("idle_look")
+                    || profileJson.get("idle_look").getAsBoolean() ? "cold" : "off";
+        }
+        this.boatRide = !profileJson.has("boat_ride") || profileJson.get("boat_ride").getAsBoolean();
         this.idleWander = bool("idle_wander");
         this.panic = bool("panic_when_hurt");
         this.avoidSun = bool("avoid_sun");
@@ -59,12 +76,12 @@ public class BehaviorTraitsScreen extends ScaledScreen {
 
     @Override
     protected int designH() {
-        return 266;
+        return 310;
     }
 
     private void recalc() {
         winW = 360;
-        winH = 266;
+        winH = 310;
         winX = (width - winW) / 2;
         winY = (height - winH) / 2;
         top = winY + HEADER_H + 12;
@@ -75,19 +92,34 @@ public class BehaviorTraitsScreen extends ScaledScreen {
     protected void init() {
         recalc();
         clearWidgets();
+        int x = winX + PAD;
 
+        // Радиус «живого» взгляда — параметр строки «Взгляд», виден только в режиме lively
+        EditBox lr = addRenderableWidget(new SelectableEditBox(
+                font, x + 54, top + ROW, 46, 16, Component.empty()));
+        lr.setMaxLength(2);
+        lr.setHint(Component.literal("3"));
+        if (profileJson.has("look_radius")) {
+            lr.setValue(String.valueOf(profileJson.get("look_radius").getAsInt()));
+        }
+        lr.visible = "lively".equals(lookMode);
+        this.lookRadiusBox = lr;
+
+        // Радиус блуждания — параметр строки «Бродить без дела», виден только при включённой галочке
         EditBox rb = addRenderableWidget(new SelectableEditBox(
-                font, winX + PAD + 170, top + 20, 46, 16, Component.empty()));
+                font, x + INDENT, top + ROW * 3, 46, 16, Component.empty()));
         rb.setMaxLength(4);
         rb.setHint(Component.literal("0"));
         if (profileJson.has("idle_wander_radius")) {
             rb.setValue(String.valueOf(profileJson.get("idle_wander_radius").getAsInt()));
         }
+        rb.visible = idleWander;
         this.wanderRadiusBox = rb;
+
         this.autoTargetBox = null;
         if (!"none".equals(autoMode)) {
             EditBox b = addRenderableWidget(new SelectableEditBox(
-                    font, winX + PAD, top + 174, winW - PAD * 2, 16, Component.empty()));
+                    font, x, top + 224, winW - PAD * 2, 16, Component.empty()));
             b.setMaxLength(48);
             b.setHint(Component.translatable("player".equals(autoMode)
                     ? "wh_npcs.ui.behavior.hint.player" : "wh_npcs.ui.behavior.hint.entity"));
@@ -108,34 +140,60 @@ public class BehaviorTraitsScreen extends ScaledScreen {
         String tooltip = null;
         hoverTooltip = null;
         int x = winX + PAD;
-        if (toggle(g, x, top, idleLook, Component.translatable("wh_npcs.ui.behavior.look").getString(), mouseX, mouseY)) {
+
+        // === Левая колонка: взгляд + характер ===
+        boolean lookHover = isOver(mouseX, mouseY, x, top, 150, 18);
+        VanillaUIHelper.drawButton(g, x, top, 150, 18, lookHover);
+        g.drawCenteredString(font, Component.translatable("wh_npcs.ui.behavior.look_mode",
+                        lookModeLabel()).getString() + " ▾", x + 75, top + 5,
+                lookHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
+        if (lookHover) {
             tooltip = Component.translatable("wh_npcs.ui.behavior.tip.look").getString();
         }
-        if (toggle(g, x, top + 22, idleWander, Component.translatable("wh_npcs.ui.behavior.wander").getString(), mouseX, mouseY)) {
+        if ("lively".equals(lookMode)) {
+            // Выравнивание по левому краю колонки (как кнопка выше и чекбоксы ниже)
+            g.drawString(font, Component.translatable("wh_npcs.ui.behavior.look_radius").getString(),
+                    x, top + ROW + 4, VanillaUIHelper.TEXT_GRAY, false);
+            g.drawString(font, Component.translatable("wh_npcs.ui.behavior.look_radius_blocks").getString(),
+                    x + 106, top + ROW + 4, VanillaUIHelper.TEXT_WHITE, false);
+            if (isOver(mouseX, mouseY, x, top + ROW, 150, 16)) {
+                tooltip = Component.translatable("wh_npcs.ui.behavior.tip.look_radius").getString();
+            }
+        }
+        if (toggle(g, x, top + ROW * 2, idleWander, Component.translatable("wh_npcs.ui.behavior.wander").getString(), mouseX, mouseY)) {
             tooltip = Component.translatable("wh_npcs.ui.behavior.tip.wander").getString();
         }
-        g.drawString(font, Component.translatable("wh_npcs.ui.behavior.blocks_inf").getString(), x + 222, top + 24, VanillaUIHelper.TEXT_WHITE, false);
-        if (toggle(g, x, top + 44, panic, Component.translatable("wh_npcs.ui.behavior.panic").getString(), mouseX, mouseY)) {
+        if (idleWander) {
+            g.drawString(font, Component.translatable("wh_npcs.ui.behavior.blocks_inf").getString(),
+                    x + INDENT + 52, top + ROW * 3 + 4, VanillaUIHelper.TEXT_WHITE, false);
+        }
+        if (toggle(g, x, top + ROW * 4, panic, Component.translatable("wh_npcs.ui.behavior.panic").getString(), mouseX, mouseY)) {
             tooltip = Component.translatable("wh_npcs.ui.behavior.tip.panic").getString();
         }
-        if (toggle(g, x, top + 66, avoidSun, Component.translatable("wh_npcs.ui.behavior.avoid_sun").getString(), mouseX, mouseY)) {
+        if (toggle(g, x, top + ROW * 5, avoidSun, Component.translatable("wh_npcs.ui.behavior.avoid_sun").getString(), mouseX, mouseY)) {
             tooltip = Component.translatable("wh_npcs.ui.behavior.tip.avoid_sun").getString();
         }
-        if (toggle(g, x, top + 88, burnInSun, Component.translatable("wh_npcs.ui.behavior.burn_sun").getString(), mouseX, mouseY)) {
+        if (toggle(g, x, top + ROW * 6, burnInSun, Component.translatable("wh_npcs.ui.behavior.burn_sun").getString(), mouseX, mouseY)) {
             tooltip = Component.translatable("wh_npcs.ui.behavior.tip.burn_sun").getString();
         }
+
+        // === Правая колонка: физика/транспорт ===
         int x2 = x + 180;
-        if (toggle(g, x2, top + 44, pushable, Component.translatable("wh_npcs.ui.behavior.pushable").getString(), mouseX, mouseY)) {
+        if (toggle(g, x2, top, boatRide, Component.translatable("wh_npcs.ui.behavior.boat_ride").getString(), mouseX, mouseY)) {
+            tooltip = Component.translatable("wh_npcs.ui.behavior.tip.boat_ride").getString();
+        }
+        if (toggle(g, x2, top + ROW, pushable, Component.translatable("wh_npcs.ui.behavior.pushable").getString(), mouseX, mouseY)) {
             tooltip = Component.translatable("wh_npcs.ui.behavior.tip.pushable").getString();
         }
-        if (toggle(g, x2, top + 66, passable, Component.translatable("wh_npcs.ui.behavior.passable").getString(), mouseX, mouseY)) {
+        if (toggle(g, x2, top + ROW * 2, passable, Component.translatable("wh_npcs.ui.behavior.passable").getString(), mouseX, mouseY)) {
             tooltip = Component.translatable("wh_npcs.ui.behavior.tip.passable").getString();
         }
 
-        g.drawString(font, Component.translatable("wh_npcs.ui.behavior.follow_label").getString(), x, top + 122, VanillaUIHelper.TEXT_GRAY, false);
-        boolean modeHover = isOver(mouseX, mouseY, x, top + 138, 150, 18);
-        VanillaUIHelper.drawButton(g, x, top + 138, 150, 18, modeHover);
-        g.drawCenteredString(font, modeLabel() + " ▾", x + 75, top + 143,
+        // === Низ: постоянное следование ===
+        g.drawString(font, Component.translatable("wh_npcs.ui.behavior.follow_label").getString(), x, top + 172, VanillaUIHelper.TEXT_GRAY, false);
+        boolean modeHover = isOver(mouseX, mouseY, x, top + 186, 150, 18);
+        VanillaUIHelper.drawButton(g, x, top + 186, 150, 18, modeHover);
+        g.drawCenteredString(font, modeLabel() + " ▾", x + 75, top + 191,
                 modeHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
         if (modeHover) {
             tooltip = Component.translatable("wh_npcs.ui.behavior.tip.follow").getString();
@@ -143,7 +201,7 @@ public class BehaviorTraitsScreen extends ScaledScreen {
         if (!"none".equals(autoMode)) {
             g.drawString(font, Component.translatable("player".equals(autoMode)
                             ? "wh_npcs.ui.behavior.player_nick" : "wh_npcs.ui.behavior.entity_uuid").getString(),
-                    x, top + 162, VanillaUIHelper.TEXT_WHITE, false);
+                    x, top + 212, VanillaUIHelper.TEXT_WHITE, false);
         }
 
         drawBtn(g, Component.translatable("wh_npcs.ui.common.done").getString(), winX + winW - PAD - 80, bottomY, 80, mouseX, mouseY, VanillaUIHelper.TEXT_GREEN);
@@ -172,36 +230,43 @@ public class BehaviorTraitsScreen extends ScaledScreen {
         recalc();
         if (button == 0) {
             int x = winX + PAD;
-            if (isOver(mouseX, mouseY, x, top, 12, 12)) {
-                idleLook = !idleLook;
+            if (isOver(mouseX, mouseY, x, top, 150, 18)) {
+                cycleLookMode();
                 return true;
             }
-            if (isOver(mouseX, mouseY, x, top + 22, 12, 12)) {
+            if (isOver(mouseX, mouseY, x, top + ROW * 2, 12, 12)) {
                 idleWander = !idleWander;
+                if (wanderRadiusBox != null) {
+                    wanderRadiusBox.visible = idleWander;
+                }
                 return true;
             }
-            if (isOver(mouseX, mouseY, x, top + 44, 12, 12)) {
+            if (isOver(mouseX, mouseY, x, top + ROW * 4, 12, 12)) {
                 panic = !panic;
                 return true;
             }
-            if (isOver(mouseX, mouseY, x, top + 66, 12, 12)) {
+            if (isOver(mouseX, mouseY, x, top + ROW * 5, 12, 12)) {
                 avoidSun = !avoidSun;
                 return true;
             }
-            if (isOver(mouseX, mouseY, x, top + 88, 12, 12)) {
+            if (isOver(mouseX, mouseY, x, top + ROW * 6, 12, 12)) {
                 burnInSun = !burnInSun;
                 return true;
             }
             int x2 = x + 180;
-            if (isOver(mouseX, mouseY, x2, top + 44, 12, 12)) {
+            if (isOver(mouseX, mouseY, x2, top, 12, 12)) {
+                boatRide = !boatRide;
+                return true;
+            }
+            if (isOver(mouseX, mouseY, x2, top + ROW, 12, 12)) {
                 pushable = !pushable;
                 return true;
             }
-            if (isOver(mouseX, mouseY, x2, top + 66, 12, 12)) {
+            if (isOver(mouseX, mouseY, x2, top + ROW * 2, 12, 12)) {
                 passable = !passable;
                 return true;
             }
-            if (isOver(mouseX, mouseY, x, top + 138, 150, 18)) {
+            if (isOver(mouseX, mouseY, x, top + 186, 150, 18)) {
                 cycleMode();
                 return true;
             }
@@ -225,8 +290,31 @@ public class BehaviorTraitsScreen extends ScaledScreen {
             profileJson.addProperty("auto_follow_target", autoTargetBox.getValue());
         }
         persistRadius();
+        persistLookRadius();
         autoMode = MODES[(idx + 1) % MODES.length];
         init(minecraft, width, height);
+    }
+
+    private void cycleLookMode() {
+        int idx = 0;
+        for (int i = 0; i < LOOK_MODES.length; i++) {
+            if (LOOK_MODES[i].equals(lookMode)) {
+                idx = i;
+            }
+        }
+        lookMode = LOOK_MODES[(idx + 1) % LOOK_MODES.length];
+        if (lookRadiusBox != null) {
+            lookRadiusBox.visible = "lively".equals(lookMode);
+        }
+    }
+
+    private String lookModeLabel() {
+        for (int i = 0; i < LOOK_MODES.length; i++) {
+            if (LOOK_MODES[i].equals(lookMode)) {
+                return Component.translatable(LOOK_LABEL_KEYS[i]).getString();
+            }
+        }
+        return Component.translatable(LOOK_LABEL_KEYS[1]).getString();
     }
 
     private String modeLabel() {
@@ -240,10 +328,21 @@ public class BehaviorTraitsScreen extends ScaledScreen {
 
     private void apply() {
 
-        if (idleLook) {
-            profileJson.remove("idle_look");
+        if ("cold".equals(lookMode)) {
+            profileJson.remove("look_mode");
         } else {
+            profileJson.addProperty("look_mode", lookMode);
+        }
+        // Легаси-флаг idle_look держим синхронно для совместимости старых версий
+        if ("off".equals(lookMode)) {
             profileJson.addProperty("idle_look", false);
+        } else {
+            profileJson.remove("idle_look");
+        }
+        if (boatRide) {
+            profileJson.remove("boat_ride");
+        } else {
+            profileJson.addProperty("boat_ride", false);
         }
         writeFlag("idle_wander", idleWander);
         writeFlag("panic_when_hurt", panic);
@@ -252,6 +351,7 @@ public class BehaviorTraitsScreen extends ScaledScreen {
         writeFlag("pushable", pushable);
         writeFlag("passable", passable);
         persistRadius();
+        persistLookRadius();
         if ("none".equals(autoMode)) {
             profileJson.remove("auto_follow");
             profileJson.remove("auto_follow_target");
@@ -276,6 +376,23 @@ public class BehaviorTraitsScreen extends ScaledScreen {
             profileJson.addProperty("idle_wander_radius", r);
         } else {
             profileJson.remove("idle_wander_radius");
+        }
+    }
+
+    /** Радиус живого взгляда: 1..16, дефолт 3 (в json не пишем). */
+    private void persistLookRadius() {
+        int r = 3;
+        if (lookRadiusBox != null && !lookRadiusBox.getValue().trim().isEmpty()) {
+            try {
+                r = Math.max(1, Math.min(16, Integer.parseInt(lookRadiusBox.getValue().trim())));
+            } catch (NumberFormatException e) {
+                r = 3;
+            }
+        }
+        if (r != 3) {
+            profileJson.addProperty("look_radius", r);
+        } else {
+            profileJson.remove("look_radius");
         }
     }
 

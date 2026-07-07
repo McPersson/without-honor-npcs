@@ -60,7 +60,9 @@ public class ConditionsEditorScreen extends ScaledScreen {
             new TypeInfo("player_state", "wh_npcs.ui.cond.type.player_state.label",
                     "wh_npcs.ui.cond.type.player_state.desc", "wh_npcs.ui.cond.type.player_state.detail"),
             new TypeInfo("npc_health", "wh_npcs.ui.cond.type.npc_health.label",
-                    "wh_npcs.ui.cond.type.npc_health.desc", "wh_npcs.ui.cond.type.npc_health.detail"));
+                    "wh_npcs.ui.cond.type.npc_health.desc", "wh_npcs.ui.cond.type.npc_health.detail"),
+            new TypeInfo("player_level", "wh_npcs.ui.cond.type.player_level.label",
+                    "wh_npcs.ui.cond.type.player_level.desc", "wh_npcs.ui.cond.type.player_level.detail"));
 
     private final Screen parent;
 
@@ -102,6 +104,8 @@ public class ConditionsEditorScreen extends ScaledScreen {
     private EditBox foodMaxBox;
     private EditBox nhMinBox;
     private EditBox nhMaxBox;
+    private EditBox plMinBox;
+    private EditBox plMaxBox;
     private String weatherState = "clear";
     private String effectMode = "off";
     @Nullable
@@ -373,12 +377,24 @@ public class ConditionsEditorScreen extends ScaledScreen {
             }
             case "npc_health" -> {
                 Conditions.NpcHealth nh = (Conditions.NpcHealth) condition;
-                // сдвиг вправо на 15px — слева от полей кнопки «−» скраба
+                // сдвиг вправо на 15px — слева от полей кнопки «−» скраба;
+                // max ещё правее, чтобы «До:» не липла к «−»
                 nhMinBox = numField(rightX + 55, edY() + 14, nh.minPct());
-                nhMaxBox = numField(rightX + 159, edY() + 14, nh.maxPct());
+                nhMaxBox = numField(rightX + 185, edY() + 14, nh.maxPct());
                 scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(nhMinBox, 0, 100, 5, 0.5F,
                         "", true, () -> setFocused(null)));
                 scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(nhMaxBox, 0, 100, 5, 0.5F,
+                        "", true, () -> setFocused(null)));
+            }
+            case "player_level" -> {
+                Conditions.PlayerLevel pl = (Conditions.PlayerLevel) condition;
+                // сдвиг вправо на 15px — слева от полей кнопки «−» скраба;
+                // max ещё правее, чтобы «До:» не липла к «−»
+                plMinBox = numField(rightX + 55, edY() + 14, pl.min());
+                plMaxBox = numField(rightX + 185, edY() + 14, pl.max());
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(plMinBox, 0, 10000, 1, 0.2F,
+                        "", true, () -> setFocused(null)));
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(plMaxBox, 0, 10000, 1, 0.2F,
                         "", true, () -> setFocused(null)));
             }
             default -> {
@@ -569,6 +585,8 @@ public class ConditionsEditorScreen extends ScaledScreen {
                         new ArrayList<>(draftEffects), effectMode));
                 case "npc_health" -> store(new Conditions.NpcHealth(
                         clampPct(parseOpt(nhMinBox)), clampPct(parseOpt(nhMaxBox))));
+                case "player_level" -> store(new Conditions.PlayerLevel(
+                        clampLevel(parseOpt(plMinBox)), clampLevel(parseOpt(plMaxBox))));
                 default -> {
                 }
             }
@@ -595,6 +613,12 @@ public class ConditionsEditorScreen extends ScaledScreen {
         return v == null ? null : Math.max(0, Math.min(100, v));
     }
 
+    /** Уровни опыта 0..10000 включительно; null-граница не проверяется. */
+    @Nullable
+    private static Integer clampLevel(@Nullable Integer v) {
+        return v == null ? null : Math.max(0, Math.min(10000, v));
+    }
+
     private void addCondition(TypeInfo type) {
         DialogueCondition created = switch (type.type()) {
             case "items" -> new ItemsCondition(List.of(new ItemsCondition.Slot(
@@ -615,6 +639,7 @@ public class ConditionsEditorScreen extends ScaledScreen {
             case "player_state" -> new Conditions.PlayerState(null, null, null, null,
                     new ArrayList<>(), "off");
             case "npc_health" -> new Conditions.NpcHealth(null, 50);
+            case "player_level" -> new Conditions.PlayerLevel(5, null);
             case "score" -> new Conditions.Score("objective", null, null);
             default -> new Conditions.Score("objective", null, null);
         };
@@ -775,6 +800,11 @@ public class ConditionsEditorScreen extends ScaledScreen {
                     nh.minPct() != null ? nh.minPct() : 0,
                     nh.maxPct() != null ? nh.maxPct() : 100).getString();
         }
+        if (condition instanceof Conditions.PlayerLevel pl) {
+            return Component.translatable("wh_npcs.ui.conditions.sum_player_level",
+                    pl.min() != null ? pl.min() : 0,
+                    pl.max() != null ? pl.max() : "∞").getString();
+        }
         return condition.type();
     }
 
@@ -934,13 +964,27 @@ public class ConditionsEditorScreen extends ScaledScreen {
             case "npc_health" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.from").getString(),
                         rightX + 16, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
-                g.drawString(font, "%", rightX + 111, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, "%", rightX + 114, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.to").getString(),
-                        rightX + 126, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
-                g.drawString(font, "%", rightX + 215, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                        rightX + 146, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, "%", rightX + 244, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.empty_bound").getString(),
                         rightX, edY() + 40, VanillaUIHelper.TEXT_DARK_GRAY, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.conditions.npc_hp_note").getString(),
+                        rightX, edY() + 56, VanillaUIHelper.TEXT_WHITE, false);
+            }
+            case "player_level" -> {
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.from").getString(),
+                        rightX + 16, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.level_unit").getString(),
+                        rightX + 114, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.to").getString(),
+                        rightX + 146, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.level_unit").getString(),
+                        rightX + 244, edY() + 18, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.empty_bound").getString(),
+                        rightX, edY() + 40, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.conditions.player_level_note").getString(),
                         rightX, edY() + 56, VanillaUIHelper.TEXT_WHITE, false);
             }
             default -> g.drawString(font,

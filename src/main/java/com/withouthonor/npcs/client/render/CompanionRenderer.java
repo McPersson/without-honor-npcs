@@ -134,7 +134,8 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
         super.setupRotations(entity, poseStack, ageInTicks, rotationYaw, partialTicks);
 
         CompanionEntity.RenderTransform t = entity.getRenderTransform();
-        if (t.hasRotation()) {
+        // Портрет диалога не должен наследовать поворот трансформа
+        if (t.hasRotation() && !CompanionEntity.GUI_POSE_CONTEXT) {
             if (t.rotY() != 0) {
                 poseStack.mulPose(com.mojang.math.Axis.YP.rotationDegrees(t.rotY()));
             }

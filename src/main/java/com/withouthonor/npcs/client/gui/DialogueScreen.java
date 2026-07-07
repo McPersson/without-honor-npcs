@@ -199,7 +199,15 @@ public class DialogueScreen extends ScaledScreen {
         return cachedLines;
     }
 
+    // Инлайн-аватары: @Имя в тексте → «   Имя» с маркер-стилем (insertion "wh_avatar:Имя");
+    // insertion переживает font.split и читается через componentStyleAtWidth в рендер-проходе
+    private static final java.util.regex.Pattern AVATAR_PATTERN =
+            java.util.regex.Pattern.compile("(?<![A-Za-z0-9_@])@([A-Za-z0-9_]{3,16})(?![A-Za-z0-9_])");
+    private static final String AVATAR_MARKER = "wh_avatar:";
+    private boolean hasAvatarMentions;
+
     private Component buildPageComponent(String page) {
+        hasAvatarMentions = false;
         MutableComponent root = Component.empty();
         StringBuilder seg = new StringBuilder();
         String ann = null;
@@ -232,7 +240,7 @@ public class DialogueScreen extends ScaledScreen {
         if (seg.length() == 0) {
             return;
         }
-        MutableComponent part = Component.literal(seg.toString());
+        MutableComponent part = withAvatarMarkers(seg.toString());
         if (ann != null) {
             DialogueNodeData.Annotation a = annotationById(ann);
             Component hover;
@@ -251,6 +259,74 @@ public class DialogueScreen extends ScaledScreen {
         }
         root.append(part);
         seg.setLength(0);
+    }
+
+    /** Разбивает текст по упоминаниям @Имя: вместо «@Имя» вставляется «   Имя» с маркер-insertion;
+     *  три ведущих пробела (~12px) резервируют место под голову игрока 8x8 с зазором ~2px
+     *  с каждой стороны. Активные §-коды переносятся через границы сегментов
+     *  (легаси-коды не наследуются сиблингами). */
+    private MutableComponent withAvatarMarkers(String text) {
+        java.util.regex.Matcher m = AVATAR_PATTERN.matcher(text);
+        if (!m.find()) {
+            return Component.literal(text);
+        }
+        MutableComponent out = Component.empty();
+        int last = 0;
+        String active = "";
+        do {
+            if (m.start() > last) {
+                String part = text.substring(last, m.start());
+                // Съедаем один авторский пробел перед @: резерв под голову уже даёт отступ,
+                // иначе суммарный зазор выглядит как двойной пробел.
+                if (part.endsWith(" ")) {
+                    part = part.substring(0, part.length() - 1);
+                }
+                out.append(Component.literal(active + part));
+                active = accumulateCodes(active, part);
+            }
+            String name = m.group(1);
+            out.append(Component.literal(active + "   " + name)
+                    .withStyle(s -> s.withInsertion(AVATAR_MARKER + name)));
+            hasAvatarMentions = true;
+            last = m.end();
+        } while (m.find());
+        if (last < text.length()) {
+            out.append(Component.literal(active + text.substring(last)));
+        }
+        return out;
+    }
+
+    /** Накопление активных §-кодов: цвет сбрасывает стили, §r сбрасывает всё. */
+    private static String accumulateCodes(String active, String part) {
+        String result = active;
+        for (int i = 0; i < part.length() - 1; i++) {
+            if (part.charAt(i) == '§') {
+                char c = Character.toLowerCase(part.charAt(i + 1));
+                if (c == 'r') {
+                    result = "";
+                } else if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+                    result = "§" + c;
+                } else if (c >= 'k' && c <= 'o') {
+                    result = result + "§" + c;
+                }
+                i++;
+            }
+        }
+        return result;
+    }
+
+    /** Голова игрока 8x8 из кэша скинов (как FlagsScreen.drawPlayerHead), с фолбэком-заглушкой. */
+    private static void drawPlayerHead(GuiGraphics g, String name, int x, int y) {
+        com.withouthonor.npcs.client.cache.ClientSkinCache.Skin skin = name == null || name.isEmpty()
+                ? null : com.withouthonor.npcs.client.cache.ClientSkinCache.getInstance().get(name);
+        if (skin != null) {
+            g.blit(skin.location(), x, y, 8, 8, 8.0F, 8.0F, 8, 8, 64, 64);
+            g.blit(skin.location(), x, y, 8, 8, 40.0F, 8.0F, 8, 8, 64, 64);
+        } else {
+            g.fill(x, y, x + 8, y + 8, 0xFF6E5037);
+            g.fill(x + 2, y + 4, x + 3, y + 5, 0xFF2B1F14);
+            g.fill(x + 5, y + 4, x + 6, y + 5, 0xFF2B1F14);
+        }
     }
 
     @Nullable
@@ -507,12 +583,22 @@ public class DialogueScreen extends ScaledScreen {
             FormattedCharSequence line = lines.get(i);
             g.drawString(font, line, textX + 8, y, VanillaUIHelper.TEXT_WHITE, false);
 
-            if (hasAnn) {
+            if (hasAnn || hasAvatarMentions) {
+                String lastAvatar = null;
                 for (int px = 0; px < textW - 16; px++) {
                     Style st = font.getSplitter().componentStyleAtWidth(line, px);
-                    if (st != null && st.getHoverEvent() != null) {
+                    if (hasAnn && st != null && st.getHoverEvent() != null) {
                         g.fill(textX + 8 + px, y + LINE_H - 1, textX + 9 + px, y + LINE_H, 0xFF35C8C8);
                     }
+                    // Аватар: первый пиксель маркер-стиля — рисуем голову на месте трёх пробелов
+                    // (+2px — зазор от предыдущего текста, ещё ~2px остаётся до имени)
+                    String ins = st != null ? st.getInsertion() : null;
+                    String avatar = ins != null && ins.startsWith(AVATAR_MARKER)
+                            ? ins.substring(AVATAR_MARKER.length()) : null;
+                    if (avatar != null && !avatar.equals(lastAvatar)) {
+                        drawPlayerHead(g, avatar, textX + 8 + px + 2, y);
+                    }
+                    lastAvatar = avatar;
                 }
             }
             y += LINE_H;

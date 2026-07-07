@@ -52,6 +52,10 @@ public class PhrasesEditorScreen extends ScaledScreen {
     private EditBox radiusBox;
     private EditBox cooldownBox;
 
+    // Инлайн-переименование фразы (паттерн startNodeRename из DialogueEditorScreen)
+    private int renamingPhrase = -1;
+    private EditBox phraseRenameBox;
+
     private int winX, winY, winW, winH;
     private int tabRowY, listY, listH;
     private int bottomY;
@@ -107,6 +111,8 @@ public class PhrasesEditorScreen extends ScaledScreen {
     protected void init() {
         recalc();
         clearWidgets();
+        phraseRenameBox = null;
+        renamingPhrase = -1;
         radiusBox = addRenderableWidget(new SelectableEditBox(font, winX + winW - PAD - 142,
                 winY + HEADER_H + 4, 32, 16, Component.translatable("wh_npcs.ui.phrases.radius")));
         radiusBox.setMaxLength(2);
@@ -134,6 +140,57 @@ public class PhrasesEditorScreen extends ScaledScreen {
             newPhraseBox.setValue("");
             scroll = Math.max(0, pool().size() - visibleRows());
         }
+    }
+
+    private void startPhraseRename(int index) {
+        cancelPhraseRename();
+        renamingPhrase = index;
+        phraseRenameBox = addRenderableWidget(new SelectableEditBox(font, winX + PAD + 2,
+                listY, winW - PAD * 2 - 10, ROW_H, Component.empty()));
+        phraseRenameBox.setMaxLength(120);
+        phraseRenameBox.setValue(pool().get(index));
+        setFocused(phraseRenameBox);
+        phraseRenameBox.setFocused(true);
+    }
+
+    private void cancelPhraseRename() {
+        if (phraseRenameBox != null) {
+            removeWidget(phraseRenameBox);
+            phraseRenameBox = null;
+        }
+        renamingPhrase = -1;
+    }
+
+    private void commitPhraseRename() {
+        if (renamingPhrase < 0 || phraseRenameBox == null || renamingPhrase >= pool().size()) {
+            cancelPhraseRename();
+            return;
+        }
+        String text = phraseRenameBox.getValue().trim();
+        if (text.isEmpty()) {
+            phraseRenameBox.setTextColor(0xFF5555);
+            return;
+        }
+        pool().set(renamingPhrase, text);
+        cancelPhraseRename();
+    }
+
+    /** Перенос длинного текста в тултипе: разрыв строки примерно каждые 50 символов (по словам). */
+    private static String wrapTooltip(String text) {
+        StringBuilder out = new StringBuilder();
+        int lineLen = 0;
+        for (String word : text.split(" ")) {
+            if (lineLen > 0 && lineLen + 1 + word.length() > 50) {
+                out.append('\n');
+                lineLen = 0;
+            } else if (lineLen > 0) {
+                out.append(' ');
+                lineLen++;
+            }
+            out.append(word);
+            lineLen += word.length();
+        }
+        return out.toString();
     }
 
     private int visibleRows() {
@@ -244,13 +301,34 @@ public class PhrasesEditorScreen extends ScaledScreen {
         scroll = Math.max(0, Math.min(scroll, Math.max(0, pool().size() - visible)));
         int y = listY + 3;
         for (int i = scroll; i < Math.min(pool().size(), scroll + visible); i++) {
+            if (i == renamingPhrase) {
+                // Строка редактируется — вместо текста и иконок стоит инлайн-поле
+                if (phraseRenameBox != null) {
+                    phraseRenameBox.setX(winX + PAD + 2);
+                    phraseRenameBox.setY(y);
+                }
+                y += ROW_H;
+                continue;
+            }
             boolean hovered = isOver(mouseX, mouseY, winX + PAD + 2, y, winW - PAD * 2 - 4, ROW_H);
             if (hovered) {
                 g.fill(winX + PAD + 2, y, winX + winW - PAD - 2, y + ROW_H, VanillaUIHelper.BG_HOVERED);
             }
-            g.drawString(font, font.plainSubstrByWidth(pool().get(i), winW - PAD * 2 - 26),
-                    winX + PAD + 6, y + 2, VanillaUIHelper.TEXT_WHITE, false);
+            String phrase = pool().get(i);
+            int textW = winW - PAD * 2 - 40;
+            String shown = font.plainSubstrByWidth(phrase, textW);
+            if (shown.length() < phrase.length()) {
+                // Текст обрезан — показываем «...», полный текст в тултипе
+                shown = font.plainSubstrByWidth(phrase, textW - font.width("...")) + "...";
+                if (hovered && !isOver(mouseX, mouseY, winX + winW - PAD - 30, y + 1, 24, 10)) {
+                    tooltip = wrapTooltip(phrase);
+                }
+            }
+            g.drawString(font, shown, winX + PAD + 6, y + 2, VanillaUIHelper.TEXT_WHITE, false);
             if (hovered) {
+                boolean renHover = isOver(mouseX, mouseY, winX + winW - PAD - 30, y + 1, 10, 10);
+                VanillaUIHelper.drawRenameIcon(g, font, winX + winW - PAD - 30, y + 2,
+                        renHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GRAY);
                 boolean delHover = isOver(mouseX, mouseY, winX + winW - PAD - 16, y + 1, 10, 10);
                 g.drawString(font, "✕", winX + winW - PAD - 16, y + 2,
                         delHover ? 0xFFFF5555 : VanillaUIHelper.TEXT_GRAY, false);
@@ -295,6 +373,14 @@ public class PhrasesEditorScreen extends ScaledScreen {
         }
         if (button == 0) {
             recalc();
+            if (renamingPhrase >= 0) {
+                if (phraseRenameBox != null && isOver(mouseX, mouseY, phraseRenameBox.getX(),
+                        phraseRenameBox.getY(), phraseRenameBox.getWidth(), phraseRenameBox.getHeight())) {
+                    return superMouseClicked(mouseX, mouseY, button);
+                }
+                commitPhraseRename();
+                return true;
+            }
             if (isOver(mouseX, mouseY, winX + PAD, winY + HEADER_H + 6, 12, 12)) {
                 enabled = !enabled;
                 return true;
@@ -323,6 +409,10 @@ public class PhrasesEditorScreen extends ScaledScreen {
             int visible = visibleRows();
             int y = listY + 3;
             for (int i = scroll; i < Math.min(pool().size(), scroll + visible); i++) {
+                if (isOver(mouseX, mouseY, winX + winW - PAD - 30, y + 1, 10, 10)) {
+                    startPhraseRename(i);
+                    return true;
+                }
                 if (isOver(mouseX, mouseY, winX + winW - PAD - 16, y + 1, 10, 10)) {
                     pool().remove(i);
                     return true;
@@ -335,6 +425,17 @@ public class PhrasesEditorScreen extends ScaledScreen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (renamingPhrase >= 0) {
+            if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER
+                    || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
+                commitPhraseRename();
+                return true;
+            }
+            if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) {
+                cancelPhraseRename();
+                return true;
+            }
+        }
         if (newPhraseBox.isFocused()
                 && (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER
                 || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER)) {
@@ -370,6 +471,9 @@ public class PhrasesEditorScreen extends ScaledScreen {
 
     @Override
     public void onClose() {
+        if (renamingPhrase >= 0) {
+            commitPhraseRename();
+        }
         writeBack();
         if (minecraft != null) {
             minecraft.setScreen(parent);

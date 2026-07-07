@@ -88,10 +88,11 @@ public class ReactionsScreen extends ScaledScreen {
     protected void init() {
         recalc();
         clearWidgets();
-        rangeBox = addRenderableWidget(new SelectableEditBox(font, winX + PAD + 150,
+        // Поле сразу за меткой «Радиус подхода:», с небольшим зазором
+        int labelW = font.width(Component.translatable("wh_npcs.ui.reactions.range_label").getString());
+        rangeBox = addRenderableWidget(new SelectableEditBox(font, winX + PAD + labelW + 6,
                 winY + HEADER_H + 16 + EVENTS.length * 24 + 4, 36, 16, Component.empty()));
         rangeBox.setMaxLength(2);
-        rangeBox.setHint(Component.literal("8"));
         if (profileJson.has("react_approach_range") && profileJson.get("react_approach_range").getAsInt() > 0) {
             rangeBox.setValue(String.valueOf(profileJson.get("react_approach_range").getAsInt()));
         }
@@ -121,8 +122,11 @@ public class ReactionsScreen extends ScaledScreen {
         }
 
         int ry = y0 + EVENTS.length * 24 + 4;
-        g.drawString(font, Component.translatable("wh_npcs.ui.reactions.range_label").getString(), winX + PAD, ry + 4, VanillaUIHelper.TEXT_GRAY, false);
-        if (isOver(mouseX, mouseY, winX + PAD, ry, 140, 16)) {
+        String rangeLabel = Component.translatable("wh_npcs.ui.reactions.range_label").getString();
+        // Метка по вертикальному центру поля ввода (бокс стоит на ry+4, высота 16)
+        g.drawString(font, rangeLabel, winX + PAD, ry + 8, VanillaUIHelper.TEXT_GRAY, false);
+        // Тултип и на метке, и на поле ввода
+        if (isOver(mouseX, mouseY, winX + PAD, ry + 4, font.width(rangeLabel) + 6 + 36, 16)) {
             tooltip = Component.translatable("wh_npcs.ui.reactions.range_tip").getString();
         }
 

@@ -21,6 +21,9 @@ public class ScheduleGoal extends Goal {
     private final PathNavigation navigation;
     private int recalcPath;
     private int wanderTimer;
+    // Повтор эмоции по КД (режим "cooldown"): таймер в тиках + nonce для перезапуска.
+    private int emoteRepeatTimer;
+    private int scheduleEmoteNonce;
 
     private String appliedSnapshot = "";
 
@@ -51,6 +54,7 @@ public class ScheduleGoal extends Goal {
         this.navigation.stop();
         resetPose();
         npc.setScheduleEmote("");
+        this.emoteRepeatTimer = 0;
     }
 
     @Override
@@ -76,6 +80,7 @@ public class ScheduleGoal extends Goal {
         if (!atPoint) {
             resetPose();
             npc.setScheduleEmote("");
+            this.emoteRepeatTimer = 0;
             if (distSq > FAR_TELEPORT_SQR) {
                 navigation.stop();
                 npc.moveTo(cx, target.getY(), cz, npc.getYRot(), npc.getXRot());
@@ -98,7 +103,15 @@ public class ScheduleGoal extends Goal {
     }
 
     private void applyPose(ScheduleEntry e, BlockPos target, double cx, double cz) {
-        npc.setScheduleEmote(e.emoteId(), e.emoteName(), e.emoteAuthor());
+        if (!e.emoteId().isEmpty() && "cooldown".equals(e.emoteMode())) {
+            // Повтор по КД: смена nonce обходит защиту от равного значения в setScheduleEmote.
+            if (--this.emoteRepeatTimer <= 0) {
+                this.emoteRepeatTimer = Math.max(1, e.emoteCdSec()) * 20;
+                npc.setScheduleEmote(e.emoteId(), e.emoteName(), e.emoteAuthor(), ++scheduleEmoteNonce);
+            }
+        } else {
+            npc.setScheduleEmote(e.emoteId(), e.emoteName(), e.emoteAuthor());
+        }
         if (e.isCustomPose()) {
             navigation.stop();
             if (npc.isSleeping()) {

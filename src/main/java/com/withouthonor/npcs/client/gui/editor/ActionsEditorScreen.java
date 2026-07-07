@@ -114,6 +114,13 @@ public class ActionsEditorScreen extends ScaledScreen {
 
     private EditBox commandBox;
 
+    // «Реплика» — дублирование в чат + КД (0 = без КД) с областью npc/player
+    private boolean sayToChat;
+    private String sayCdScope = "npc";
+    private int sayCooldownSec;
+    @Nullable
+    private EditBox sayCdBox;
+
     @Nullable
     private ResourceLocation soundDraft;
     private EditBox volumeBox;
@@ -129,6 +136,12 @@ public class ActionsEditorScreen extends ScaledScreen {
     private String emoteDraftId = "";
     private String emoteDraftName = "";
     private String emoteDraftAuthor = "";
+    // Режим повтора эмоции: once (по умолчанию) / always / cooldown
+    private static final String[] EMOTE_MODE_IDS = {"once", "always", "cooldown"};
+    private String emoteModeDraft = "once";
+    private int emoteCdDraft = 60;
+    @Nullable
+    private EditBox emoteCdBox;
 
     private String effectMode = "apply";
     private boolean effectRemoveAll;
@@ -352,6 +365,17 @@ public class ActionsEditorScreen extends ScaledScreen {
                 commandBox.setValue(EditorCodes.toEditor(say.text()));
                 commandBox.setHint(Component.translatable("wh_npcs.ui.actions.say_hint"));
                 commandBox.setResponder(v -> writeBack());
+                // КД повтора: 0 = без КД; сдвиг вправо на 15px — слева от поля кнопка «−» скраба
+                sayCdBox = addRenderableWidget(new SelectableEditBox(font, rightX + 55, edY() + 100, 40, 16,
+                        Component.translatable("wh_npcs.ui.actions.say_cd_label")));
+                sayCdBox.setMaxLength(4);
+                sayCdBox.setValue(String.valueOf(sayCooldownSec));
+                sayCdBox.setResponder(v -> {
+                    sayCooldownSec = Math.max(0, Math.min(3600, parseInt(sayCdBox, 0)));
+                    writeBack();
+                });
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(sayCdBox, 0, 3600, 5, 0.5F,
+                        "0", true, () -> setFocused(null)));
             }
             case "run_command" -> {
                 Actions.RunCommand command = (Actions.RunCommand) action;
@@ -369,6 +393,21 @@ public class ActionsEditorScreen extends ScaledScreen {
                 emoteIdBox.setValue(emoteDraftId);
                 emoteIdBox.setHint(Component.translatable("wh_npcs.ui.actions.emotecraft_hint"));
                 emoteIdBox.setResponder(v -> writeBack());
+                // Поле секунд КД — только в режиме «По КД» (пересоздание через init, как у attack_player)
+                if ("cooldown".equals(emoteModeDraft)) {
+                    emoteCdBox = addRenderableWidget(new SelectableEditBox(font, rightX + 210, edY() + 108, 40, 16,
+                            Component.translatable("wh_npcs.ui.actions.emote_cd_label")));
+                    emoteCdBox.setMaxLength(4);
+                    emoteCdBox.setValue(String.valueOf(emoteCdDraft));
+                    emoteCdBox.setResponder(v -> {
+                        emoteCdDraft = Math.max(1, Math.min(3600, parseInt(emoteCdBox, 60)));
+                        writeBack();
+                    });
+                    scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(emoteCdBox, 1, 3600, 5, 0.5F,
+                            "60", true, () -> setFocused(null)));
+                } else {
+                    emoteCdBox = null;
+                }
             }
             case "sound" -> {
                 Actions.Sound sound = (Actions.Sound) action;
@@ -509,6 +548,11 @@ public class ActionsEditorScreen extends ScaledScreen {
             slotCount[i] = 1;
         }
         activeSlot = 0;
+        sayToChat = false;
+        sayCdScope = "npc";
+        sayCooldownSec = 0;
+        emoteModeDraft = "once";
+        emoteCdDraft = 60;
         DialogueAction action = current();
         if (action instanceof Actions.GiveItem give) {
             for (int i = 0; i < Math.min(ACT_SLOTS, give.items().size()); i++) {
@@ -532,6 +576,12 @@ public class ActionsEditorScreen extends ScaledScreen {
             emoteDraftId = em.emoteId();
             emoteDraftName = em.emoteName();
             emoteDraftAuthor = em.emoteAuthor();
+            emoteModeDraft = em.mode();
+            emoteCdDraft = em.cooldownSec();
+        } else if (action instanceof Actions.Say say) {
+            sayToChat = say.toChat();
+            sayCdScope = say.cdScope();
+            sayCooldownSec = say.cooldownSec();
         } else if (action instanceof Actions.Effect eff) {
             effectMode = eff.mode();
             effectRemoveAll = eff.removeAll();
@@ -655,7 +705,8 @@ public class ActionsEditorScreen extends ScaledScreen {
                 case "reputation" -> actions.set(selected, new Actions.Reputation(
                         factionBox.getValue().trim(), parseInt(deltaBox, 0)));
                 case "say" -> actions.set(selected,
-                        new Actions.Say(EditorCodes.fromEditor(commandBox.getValue().trim())));
+                        new Actions.Say(EditorCodes.fromEditor(commandBox.getValue().trim()),
+                                sayToChat, sayCdScope, Math.max(0, Math.min(3600, sayCooldownSec))));
                 case "emote" -> actions.set(selected, new Actions.Emote(emoteDraft));
                 case "emotecraft_emote" -> {
                     if (emoteIdBox != null) {
@@ -667,7 +718,8 @@ public class ActionsEditorScreen extends ScaledScreen {
                         }
                     }
                     actions.set(selected, new Actions.EmotecraftEmote(
-                            emoteDraftId, emoteDraftName, emoteDraftAuthor));
+                            emoteDraftId, emoteDraftName, emoteDraftAuthor,
+                            emoteModeDraft, Math.max(1, Math.min(3600, emoteCdDraft))));
                 }
                 case "stop_emotecraft_emote" -> actions.set(selected, new Actions.StopEmotecraftEmote());
                 case "run_command" -> actions.set(selected,
@@ -1045,6 +1097,39 @@ public class ActionsEditorScreen extends ScaledScreen {
                         rightX, edY() + 52, VanillaUIHelper.TEXT_WHITE, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.say_note2").getString(),
                         rightX, edY() + 64, VanillaUIHelper.TEXT_WHITE, false);
+                // галочка «дублировать в чат» — как у фраз профиля, радиус 24 блока
+                int cy = edY() + 80;
+                boolean chHover = isOver(mouseX, mouseY, rightX, cy, 200, 12);
+                VanillaUIHelper.drawButton(g, rightX, cy, 12, 12, chHover);
+                if (sayToChat) {
+                    VanillaUIHelper.drawCheck(g, rightX + 1, cy + 2, VanillaUIHelper.TEXT_GREEN);
+                }
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.say_to_chat").getString(),
+                        rightX + 18, cy + 2,
+                        sayToChat ? VanillaUIHelper.TEXT_WHITE : VanillaUIHelper.TEXT_DARK_GRAY, false);
+                if (chHover) {
+                    multilineTooltip(g, Component.translatable("wh_npcs.ui.actions.say_to_chat_tip").getString(),
+                            mouseX, mouseY);
+                }
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.say_cd_label").getString(),
+                        rightX, edY() + 104, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.say_cd_unit").getString(),
+                        rightX + 113, edY() + 104, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                if (isOver(mouseX, mouseY, rightX, edY() + 102, 38, 12)) {
+                    multilineTooltip(g, Component.translatable("wh_npcs.ui.actions.say_cd_tip").getString(),
+                            mouseX, mouseY);
+                }
+                if (sayCooldownSec > 0) {
+                    // область КД видна только при КД > 0
+                    drawSmall(g, Component.translatable("player".equals(sayCdScope)
+                                    ? "wh_npcs.ui.actions.say_cd_player"
+                                    : "wh_npcs.ui.actions.say_cd_npc").getString(),
+                            rightX + 160, edY() + 100, 130, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                    if (isOver(mouseX, mouseY, rightX + 160, edY() + 100, 130, 18)) {
+                        multilineTooltip(g, Component.translatable(
+                                "wh_npcs.ui.actions.say_cd_scope_tip").getString(), mouseX, mouseY);
+                    }
+                }
             }
             case "emote" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.emote_caption").getString(),
@@ -1080,6 +1165,19 @@ public class ActionsEditorScreen extends ScaledScreen {
                         rightX, edY() + 76, VanillaUIHelper.TEXT_WHITE, false);
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.emotecraft_note2").getString(),
                         rightX, edY() + 88, VanillaUIHelper.TEXT_WHITE, false);
+                // режим повтора: Один раз / Каждый раз / По КД (циклическая кнопка)
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.emote_mode_label").getString(),
+                        rightX, edY() + 113, VanillaUIHelper.TEXT_GRAY, false);
+                drawSmall(g, Component.translatable("wh_npcs.ui.actions.emote_mode_" + emoteModeDraft).getString(),
+                        rightX + 60, edY() + 108, 110, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                if (isOver(mouseX, mouseY, rightX + 60, edY() + 108, 110, 18)) {
+                    multilineTooltip(g, Component.translatable(
+                            "wh_npcs.ui.actions.emote_mode_tip").getString(), mouseX, mouseY);
+                }
+                if ("cooldown".equals(emoteModeDraft)) {
+                    g.drawString(font, Component.translatable("wh_npcs.ui.actions.say_cd_unit").getString(),
+                            rightX + 268, edY() + 113, VanillaUIHelper.TEXT_DARK_GRAY, false);
+                }
             }
             case "stop_emotecraft_emote" -> {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.stop_emote_line1").getString(),
@@ -1662,6 +1760,19 @@ public class ActionsEditorScreen extends ScaledScreen {
                     return true;
                 }
             }
+            case "say" -> {
+                if (!rightClick && isOver(mouseX, mouseY, rightX, edY() + 80, 200, 12)) {
+                    sayToChat = !sayToChat;
+                    writeBack();
+                    return true;
+                }
+                if (!rightClick && sayCooldownSec > 0
+                        && isOver(mouseX, mouseY, rightX + 160, edY() + 100, 130, 18)) {
+                    sayCdScope = "player".equals(sayCdScope) ? "npc" : "player";
+                    writeBack();
+                    return true;
+                }
+            }
             case "emote" -> {
                 if (!rightClick) {
                     EmoteIcon[] icons = EmoteIcon.values();
@@ -1685,10 +1796,24 @@ public class ActionsEditorScreen extends ScaledScreen {
                             emoteDraftAuthor = ref.author();
                             if (idx >= 0 && idx < actions.size()) {
                                 actions.set(idx, new Actions.EmotecraftEmote(
-                                        emoteDraftId, emoteDraftName, emoteDraftAuthor));
+                                        emoteDraftId, emoteDraftName, emoteDraftAuthor,
+                                        emoteModeDraft, emoteCdDraft));
                             }
                         }));
                     }
+                    return true;
+                }
+                if (!rightClick && isOver(mouseX, mouseY, rightX + 60, edY() + 108, 110, 18)) {
+                    // цикл режима повтора; пересоздаём виджеты — поле КД появляется/уходит
+                    int cur = 0;
+                    for (int i = 0; i < EMOTE_MODE_IDS.length; i++) {
+                        if (EMOTE_MODE_IDS[i].equals(emoteModeDraft)) {
+                            cur = i;
+                        }
+                    }
+                    emoteModeDraft = EMOTE_MODE_IDS[(cur + 1) % EMOTE_MODE_IDS.length];
+                    writeBack();
+                    init(minecraft, width, height);
                     return true;
                 }
             }

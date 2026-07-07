@@ -48,7 +48,7 @@ public class AutoFollowGoal extends Goal {
 
     @Override
     public boolean canUse() {
-        if (npc.getFollowMode() != FollowMode.NONE) {
+        if (npc.getFollowMode() != FollowMode.NONE || npc.isPassenger()) {
             return false;
         }
         LivingEntity t = resolveTarget();
@@ -61,7 +61,7 @@ public class AutoFollowGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
-        if (npc.getFollowMode() != FollowMode.NONE) {
+        if (npc.getFollowMode() != FollowMode.NONE || npc.isPassenger()) {
             return false;
         }
         LivingEntity t = resolveTarget();

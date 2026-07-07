@@ -144,7 +144,8 @@ public final class CompanionOverlays {
         }
         Font f = font();
         poseStack.pushPose();
-        poseStack.translate(0.0F, entity.getNameTagOffsetY() + 0.35F + lines.size() * 0.22F, 0.0F);
+        // Пузырь чуть ниже (~25%), чтобы не висел слишком высоко над головой
+        poseStack.translate(0.0F, entity.getNameTagOffsetY() + 0.25F + lines.size() * 0.19F, 0.0F);
         poseStack.mulPose(dispatcher().cameraOrientation());
         poseStack.scale(-0.02F, -0.02F, 0.02F);
         org.joml.Matrix4f matrix = poseStack.last().pose();

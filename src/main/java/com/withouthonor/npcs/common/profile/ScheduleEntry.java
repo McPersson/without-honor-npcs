@@ -5,11 +5,20 @@ import net.minecraft.core.BlockPos;
 
 public record ScheduleEntry(int time, int x, int y, int z, String pose, int radius,
                             String poseName, String poseSnapshot, String emoteId,
-                            String emoteName, String emoteAuthor) {
+                            String emoteName, String emoteAuthor,
+                            String emoteMode, int emoteCdSec) {
 
     public ScheduleEntry(int time, int x, int y, int z, String pose, int radius,
                          String poseName, String poseSnapshot, String emoteId) {
         this(time, x, y, z, pose, radius, poseName, poseSnapshot, emoteId, "", "");
+    }
+
+    public ScheduleEntry(int time, int x, int y, int z, String pose, int radius,
+                         String poseName, String poseSnapshot, String emoteId,
+                         String emoteName, String emoteAuthor) {
+        // "once" = старое поведение: эмоция ставится один раз на запись.
+        this(time, x, y, z, pose, radius, poseName, poseSnapshot, emoteId,
+                emoteName, emoteAuthor, "once", 60);
     }
 
     public BlockPos pos() {
@@ -40,7 +49,9 @@ public record ScheduleEntry(int time, int x, int y, int z, String pose, int radi
                 o.has("pose_snapshot") ? o.get("pose_snapshot").toString() : "",
                 o.has("emote_id") ? o.get("emote_id").getAsString() : "",
                 o.has("emote_name") ? o.get("emote_name").getAsString() : "",
-                o.has("emote_author") ? o.get("emote_author").getAsString() : "");
+                o.has("emote_author") ? o.get("emote_author").getAsString() : "",
+                o.has("emote_mode") ? o.get("emote_mode").getAsString() : "once",
+                o.has("emote_cd") ? Math.max(1, Math.min(3600, o.get("emote_cd").getAsInt())) : 60);
     }
 
     public JsonObject toJson() {
@@ -65,6 +76,11 @@ public record ScheduleEntry(int time, int x, int y, int z, String pose, int radi
         }
         if (emoteAuthor != null && !emoteAuthor.isEmpty()) {
             o.addProperty("emote_author", emoteAuthor);
+        }
+        if (emoteId != null && !emoteId.isEmpty() && "cooldown".equals(emoteMode)) {
+            // Пишем только не-дефолт: старые распорядки не меняются.
+            o.addProperty("emote_mode", "cooldown");
+            o.addProperty("emote_cd", emoteCdSec);
         }
         return o;
     }

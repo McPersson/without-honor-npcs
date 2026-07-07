@@ -121,6 +121,10 @@ public class ScheduleTransformScreen extends ScaledScreen {
         return winX + 14;
     }
 
+    private int faceX() {
+        return resetX() + 78;
+    }
+
     private int doneX() {
         return winX + winW - 14 - 70;
     }
@@ -231,6 +235,13 @@ public class ScheduleTransformScreen extends ScaledScreen {
 
         drawBtn(g, Component.translatable("wh_npcs.ui.schedule_tf.reset").getString(),
                 resetX(), bottomY(), 70, mouseX, mouseY, VanillaUIHelper.TEXT_RED);
+        if (npc != null) {
+            drawBtn(g, Component.translatable("wh_npcs.ui.schedule_tf.face_me").getString(),
+                    faceX(), bottomY(), 110, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+            if (isOver(mouseX, mouseY, faceX(), bottomY(), 110, 18)) {
+                tooltip = Component.translatable("wh_npcs.ui.schedule_tf.face_me_tip").getString();
+            }
+        }
         drawBtn(g, Component.translatable("wh_npcs.ui.common.done").getString(),
                 doneX(), bottomY(), 70, mouseX, mouseY, VanillaUIHelper.TEXT_GREEN);
     }
@@ -274,6 +285,16 @@ public class ScheduleTransformScreen extends ScaledScreen {
                 box[i].setValue("0");
             }
             freeze = true;
+            return true;
+        }
+        if (button == 0 && npc != null && minecraft != null && minecraft.player != null
+                && isOver(mx, my, faceX(), bottomY(), 110, 18)) {
+            // rot_y при заморозке = абсолютное направление взгляда
+            double dx = minecraft.player.getX() - npc.getX();
+            double dz = minecraft.player.getZ() - npc.getZ();
+            float yaw = net.minecraft.util.Mth.wrapDegrees(
+                    (float) (net.minecraft.util.Mth.atan2(dz, dx) * (180.0D / Math.PI)) - 90.0F);
+            box[1].setValue(fmtNum(Math.round(yaw)));
             return true;
         }
         if (button == 0 && isOver(mx, my, doneX(), bottomY(), 70, 18)) {

@@ -138,7 +138,7 @@ public class ScheduleScreen extends ScaledScreen {
                     old.pose(),
                     Math.max(0, Math.min(32, parseInt(radiusBoxes.get(i).getValue(), old.radius()))),
                     old.poseName(), old.poseSnapshot(), old.emoteId(),
-                    old.emoteName(), old.emoteAuthor()));
+                    old.emoteName(), old.emoteAuthor(), old.emoteMode(), old.emoteCdSec()));
         }
     }
 
@@ -199,15 +199,29 @@ public class ScheduleScreen extends ScaledScreen {
             }
             String emoteLbl = e.emoteId().isEmpty() ? Component.translatable("wh_npcs.ui.schedule.emote").getString()
                     : "♪ " + emoteNames.getOrDefault(e.emoteId(), e.emoteId());
-            drawBtn(g, font.plainSubstrByWidth(emoteLbl, 60), base + COL_EMOTE, y, 66, mouseX, mouseY,
-                    e.emoteId().isEmpty() ? VanillaUIHelper.TEXT_AQUA : VanillaUIHelper.TEXT_GOLD);
+            if (e.emoteId().isEmpty()) {
+                drawBtn(g, font.plainSubstrByWidth(emoteLbl, 60), base + COL_EMOTE, y, 66, mouseX, mouseY,
+                        VanillaUIHelper.TEXT_AQUA);
+            } else {
+                // Эмоция задана: кнопка уже + мини-кнопка режима повтора «1×»/«Nс»
+                drawBtn(g, font.plainSubstrByWidth(emoteLbl, 34), base + COL_EMOTE, y, 40, mouseX, mouseY,
+                        VanillaUIHelper.TEXT_GOLD);
+                boolean cdMode = "cooldown".equals(e.emoteMode());
+                drawBtn(g, cdMode ? e.emoteCdSec() + "с" : "1×", base + COL_EMOTE + 42, y, 24,
+                        mouseX, mouseY, cdMode ? VanillaUIHelper.TEXT_GOLD : VanillaUIHelper.TEXT_AQUA);
+                if (isOver(mouseX, mouseY, base + COL_EMOTE + 42, y, 24, 18)) {
+                    tooltip = Component.translatable(cdMode
+                            ? "wh_npcs.ui.schedule.tip.emote_mode_cd"
+                            : "wh_npcs.ui.schedule.tip.emote_mode_once", e.emoteCdSec()).getString();
+                }
+            }
             drawBtn(g, Component.translatable("wh_npcs.ui.schedule.mark").getString(), base + COL_MARK, y, 60, mouseX, mouseY,
                     npc != null ? VanillaUIHelper.TEXT_WHITE : VanillaUIHelper.TEXT_DARK_GRAY);
             drawBtn(g, "✕", base + COL_DELETE, y, 18, mouseX, mouseY, VanillaUIHelper.TEXT_RED);
             if (tfHover) {
                 tooltip = Component.translatable("wh_npcs.ui.schedule.transform_tip").getString();
             }
-            if (!e.emoteId().isEmpty() && isOver(mouseX, mouseY, base + COL_EMOTE, y, 66, 18)) {
+            if (!e.emoteId().isEmpty() && isOver(mouseX, mouseY, base + COL_EMOTE, y, 40, 18)) {
                 tooltip = Component.translatable("wh_npcs.ui.schedule.tip.emote",
                         emoteNames.getOrDefault(e.emoteId(), e.emoteId())).getString();
             }
@@ -280,13 +294,22 @@ public class ScheduleScreen extends ScaledScreen {
                     }
                     return true;
                 }
-                if (isOver(mouseX, mouseY, base + COL_EMOTE, y, 66, 18)) {
+                boolean hasEmote = !rows.get(i).emoteId().isEmpty();
+                if (isOver(mouseX, mouseY, base + COL_EMOTE, y, hasEmote ? 40 : 66, 18)) {
                     writeBackRows();
                     final int row = i;
                     if (minecraft != null) {
                         minecraft.setScreen(EmotecraftScreen.forPicker(this,
                                 ref -> setRowEmote(row, ref.id(), ref.name(), ref.author())));
                     }
+                    return true;
+                }
+                if (hasEmote && isOver(mouseX, mouseY, base + COL_EMOTE + 42, y, 24, 18)) {
+                    // ЛКМ — переключить «один раз» ↔ «повтор по КД»
+                    writeBackRows();
+                    ScheduleEntry e = rows.get(i);
+                    boolean cdMode = "cooldown".equals(e.emoteMode());
+                    setRowEmoteMode(i, cdMode ? "once" : "cooldown", e.emoteCdSec());
                     return true;
                 }
                 if (isOver(mouseX, mouseY, base + COL_MARK, y, 60, 18)) {
@@ -317,8 +340,24 @@ public class ScheduleScreen extends ScaledScreen {
             int base = winX + PAD;
             for (int i = 0; i < rows.size(); i++) {
                 int y = listTop + i * 22;
-                if (isOver(mouseX, mouseY, base + COL_EMOTE, y, 66, 18)) {
+                boolean hasEmote = !rows.get(i).emoteId().isEmpty();
+                if (isOver(mouseX, mouseY, base + COL_EMOTE, y, hasEmote ? 40 : 66, 18)) {
                     setRowEmote(i, "", "", "");
+                    return true;
+                }
+                if (hasEmote && isOver(mouseX, mouseY, base + COL_EMOTE + 42, y, 24, 18)) {
+                    // ПКМ по мини-кнопке — листает пресеты секунд КД по кругу
+                    ScheduleEntry e = rows.get(i);
+                    if ("cooldown".equals(e.emoteMode())) {
+                        int idx = 0;
+                        for (int p = 0; p < EMOTE_CD_PRESETS.length; p++) {
+                            if (EMOTE_CD_PRESETS[p] == e.emoteCdSec()) {
+                                idx = p + 1;
+                                break;
+                            }
+                        }
+                        setRowEmoteMode(i, "cooldown", EMOTE_CD_PRESETS[idx % EMOTE_CD_PRESETS.length]);
+                    }
                     return true;
                 }
             }
@@ -343,7 +382,7 @@ public class ScheduleScreen extends ScaledScreen {
         }
         ScheduleEntry o = rows.get(i);
         rows.set(i, new ScheduleEntry(o.time(), o.x(), o.y(), o.z(), pose, o.radius(), poseName, snapshot,
-                o.emoteId(), o.emoteName(), o.emoteAuthor()));
+                o.emoteId(), o.emoteName(), o.emoteAuthor(), o.emoteMode(), o.emoteCdSec()));
     }
 
     public void setRowEmote(int i, String emoteId, String emoteName, String emoteAuthor) {
@@ -353,7 +392,21 @@ public class ScheduleScreen extends ScaledScreen {
         ScheduleEntry o = rows.get(i);
         rows.set(i, new ScheduleEntry(o.time(), o.x(), o.y(), o.z(), o.pose(), o.radius(),
                 o.poseName(), o.poseSnapshot(), emoteId == null ? "" : emoteId,
-                emoteName == null ? "" : emoteName, emoteAuthor == null ? "" : emoteAuthor));
+                emoteName == null ? "" : emoteName, emoteAuthor == null ? "" : emoteAuthor,
+                o.emoteMode(), o.emoteCdSec()));
+    }
+
+    /** Пресеты секунд КД повтора — ПКМ по мини-кнопке режима листает по кругу. */
+    private static final int[] EMOTE_CD_PRESETS = {15, 30, 60, 120, 300, 600};
+
+    private void setRowEmoteMode(int i, String mode, int cdSec) {
+        if (i < 0 || i >= rows.size()) {
+            return;
+        }
+        ScheduleEntry o = rows.get(i);
+        rows.set(i, new ScheduleEntry(o.time(), o.x(), o.y(), o.z(), o.pose(), o.radius(),
+                o.poseName(), o.poseSnapshot(), o.emoteId(), o.emoteName(), o.emoteAuthor(),
+                mode, Math.max(1, Math.min(3600, cdSec))));
     }
 
     private static final String[] TF_KEYS = {"rot_x", "rot_y", "rot_z", "pos_x", "pos_y", "pos_z",
@@ -419,7 +472,8 @@ public class ScheduleScreen extends ScaledScreen {
         }
         String s = (snap.has("pose") || snap.has("transform")) ? snap.toString() : "";
         rows.set(i, new ScheduleEntry(o.time(), o.x(), o.y(), o.z(), o.pose(), o.radius(),
-                o.poseName(), s, o.emoteId(), o.emoteName(), o.emoteAuthor()));
+                o.poseName(), s, o.emoteId(), o.emoteName(), o.emoteAuthor(),
+                o.emoteMode(), o.emoteCdSec()));
     }
 
     private static JsonObject cleanTransform(JsonObject t) {

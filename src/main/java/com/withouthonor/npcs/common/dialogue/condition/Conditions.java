@@ -423,6 +423,40 @@ public final class Conditions {
         }
     }
 
+    public record PlayerLevel(Integer min, Integer max) implements DialogueCondition {
+
+        @Override
+        public String type() {
+            return "player_level";
+        }
+
+        @Override
+        public boolean test(Context ctx) {
+            // Уровни опыта включительно; null-граница не проверяется.
+            int level = ctx.player().experienceLevel;
+            return (min == null || level >= min) && (max == null || level <= max);
+        }
+
+        public static PlayerLevel fromJson(JsonObject json) {
+            return new PlayerLevel(
+                    json.has("min") ? json.get("min").getAsInt() : null,
+                    json.has("max") ? json.get("max").getAsInt() : null);
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("type", type());
+            if (min != null) {
+                json.addProperty("min", min);
+            }
+            if (max != null) {
+                json.addProperty("max", max);
+            }
+            return json;
+        }
+    }
+
     public record Inverted(DialogueCondition inner) implements DialogueCondition {
 
         @Override

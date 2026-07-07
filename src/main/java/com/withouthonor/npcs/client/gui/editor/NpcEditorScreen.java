@@ -561,10 +561,19 @@ public class NpcEditorScreen extends ScaledScreen {
         poseStepper(g, poseCellX(0), contentY + POSE_UNI_DY, mouseX, mouseY);
         poseRow(g, tr("wh_npcs.ui.npc.pose_per_axis"), contentY + POSE_SCALE_DY, mouseX, mouseY);
 
-        boolean allHover = isOver(mouseX, mouseY, rx, contentY + POSE_RESETALL_DY, 130, 18);
-        VanillaUIHelper.drawButton(g, rx, contentY + POSE_RESETALL_DY, 130, 18, allHover);
-        g.drawCenteredString(font, tr("wh_npcs.ui.npc.pose_reset_all"), rx + 65, contentY + POSE_RESETALL_DY + 5,
+        // Та же сетка, что у ряда «Поворот/Позиция в мире» ниже: 142 + 6 + 142
+        boolean allHover = isOver(mouseX, mouseY, rx, contentY + POSE_RESETALL_DY, 142, 18);
+        VanillaUIHelper.drawButton(g, rx, contentY + POSE_RESETALL_DY, 142, 18, allHover);
+        g.drawCenteredString(font, tr("wh_npcs.ui.npc.pose_reset_all"), rx + 71, contentY + POSE_RESETALL_DY + 5,
                 allHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE);
+
+        if (npc != null) {
+            boolean faceHover = isOver(mouseX, mouseY, rx + 148, contentY + POSE_RESETALL_DY, 142, 18);
+            VanillaUIHelper.drawButton(g, rx + 148, contentY + POSE_RESETALL_DY, 142, 18, faceHover);
+            g.drawCenteredString(font, tr("wh_npcs.ui.npc.pose_face_me"), rx + 148 + 71,
+                    contentY + POSE_RESETALL_DY + 5,
+                    faceHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
+        }
 
         int vy = contentY + POSE_VIEW_DY;
         boolean rotHover = isOver(mouseX, mouseY, rx, vy, 142, 18);
@@ -722,8 +731,19 @@ public class NpcEditorScreen extends ScaledScreen {
         if (poseUniformClick(mx, my, button)) {
             return true;
         }
-        if (button == 0 && isOver(mx, my, poseRx(), contentY + POSE_RESETALL_DY, 130, 18)) {
+        if (button == 0 && isOver(mx, my, poseRx(), contentY + POSE_RESETALL_DY, 142, 18)) {
             resetAllPose();
+            return true;
+        }
+        if (button == 0 && npc != null
+                && isOver(mx, my, poseRx() + 148, contentY + POSE_RESETALL_DY, 142, 18)) {
+            // Разворот делает сервер (виден всем); рендер-смещение rot_y сбрасываем,
+            // чтобы модель смотрела туда же, куда повернулось тело
+            com.withouthonor.npcs.network.NetworkHandler.sendToServer(
+                    new com.withouthonor.npcs.network.NpcFacePlayerPacket(npc.getId()));
+            if (rotBox[1] != null) {
+                rotBox[1].setValue("0");
+            }
             return true;
         }
 

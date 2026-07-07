@@ -30,16 +30,23 @@ public final class FactionPackets {
     }
 
     private static void sendData(ServerPlayer player) {
+        // Считаем NPC в мире (по индексу), а не профили: профиль без NPC не учитывается
+        java.util.Map<String, Integer> factionCounts = new java.util.HashMap<>();
+        if (player.server != null) {
+            for (var e : com.withouthonor.npcs.common.storage.CompanionIndex.get(player.server).all()) {
+                if (e.profileId() == null) {
+                    continue;
+                }
+                CompanionProfile profile = ProfileManager.get().get(e.profileId());
+                if (profile != null && profile.getFaction() != null && !profile.getFaction().isEmpty()) {
+                    factionCounts.merge(profile.getFaction(), 1, Integer::sum);
+                }
+            }
+        }
         JsonArray array = new JsonArray();
         for (Faction faction : FactionRegistry.get().all()) {
             JsonObject json = faction.toJson();
-            int usedBy = 0;
-            for (CompanionProfile profile : ProfileManager.get().all()) {
-                if (faction.getId().equals(profile.getFaction())) {
-                    usedBy++;
-                }
-            }
-            json.addProperty("used_by", usedBy);
+            json.addProperty("used_by", factionCounts.getOrDefault(faction.getId(), 0));
             array.add(json);
         }
         NetworkHandler.sendToPlayer(new Data(array.toString().getBytes(StandardCharsets.UTF_8)), player);

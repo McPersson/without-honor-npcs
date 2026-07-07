@@ -129,7 +129,10 @@ public class CompanionEntity extends PathfinderMob
     private boolean cfgScheduleGlobal;
     private java.util.List<com.withouthonor.npcs.common.profile.ScheduleEntry> cfgSchedule = java.util.List.of();
 
-    private boolean cfgIdleLook;
+    // Дефолт "cold" = поведение до профиля (раньше idle_look по умолчанию был включён).
+    private String cfgLookMode = "cold";
+    private int cfgLookRadius = 3;
+    private boolean cfgBoatRide;
     private boolean cfgIdleWander;
     private int cfgIdleWanderRadius;
     private boolean cfgPanic;
@@ -1112,7 +1115,12 @@ public class CompanionEntity extends PathfinderMob
                 clearRestriction();
             }
         }
-        if (cfgIdleLook) {
+        if ("lively".equals(cfgLookMode)) {
+            // Живой взгляд: следит головой и корпусом; RandomLookAround — фолбэк, когда цель неактивна
+            this.goalSelector.addGoal(7,
+                    new com.withouthonor.npcs.common.entity.ai.WatchPlayerGoal(this));
+            this.goalSelector.addGoal(8, new net.minecraft.world.entity.ai.goal.RandomLookAroundGoal(this));
+        } else if ("cold".equals(cfgLookMode)) {
             this.goalSelector.addGoal(7, new net.minecraft.world.entity.ai.goal.LookAtPlayerGoal(
                     this, Player.class, 8.0F));
             this.goalSelector.addGoal(8, new net.minecraft.world.entity.ai.goal.RandomLookAroundGoal(this));
@@ -1154,7 +1162,10 @@ public class CompanionEntity extends PathfinderMob
                 profile.getRotX(), profile.getRotY(), profile.getRotZ(),
                 profile.getPosX(), profile.getPosY(), profile.getPosZ(),
                 profile.getScaleX(), profile.getScaleY(), profile.getScaleZ()};
-        cfgIdleLook = profile.isIdleLook();
+        cfgLookMode = profile.getLookMode();
+        // Клампим на сервере — профиль мог прийти из внешнего json
+        cfgLookRadius = Math.max(1, Math.min(16, profile.getLookRadius()));
+        cfgBoatRide = profile.isBoatRide();
         cfgPursueAttacker = profile.isPursueAttacker();
         cfgHoldPosition = profile.isHoldPosition();
         cfgIdleWander = profile.isIdleWander();
@@ -1377,6 +1388,10 @@ public class CompanionEntity extends PathfinderMob
         this.scheduleYawFrozen = frozen;
     }
 
+    public boolean isScheduleYawFrozen() {
+        return scheduleYawFrozen;
+    }
+
     public boolean isSitting() {
         return this.entityData.get(DATA_SITTING);
     }
@@ -1530,6 +1545,10 @@ public class CompanionEntity extends PathfinderMob
 
     public String cfgAutoFollowMode() {
         return cfgAutoFollowMode;
+    }
+
+    public int cfgLookRadius() {
+        return cfgLookRadius;
     }
 
     public String cfgAutoFollowTarget() {
@@ -1768,7 +1787,12 @@ public class CompanionEntity extends PathfinderMob
     }
 
     public void setScheduleEmote(String id, String name, String author) {
-        String v = packEmote(id, name, author);
+        setScheduleEmote(id, name, author, 0);
+    }
+
+    public void setScheduleEmote(String id, String name, String author, int nonce) {
+        // Смена nonce меняет строку — защита от равного значения не блокирует повтор.
+        String v = packEmote(id, name, author, nonce);
         if (!this.entityData.get(DATA_SCHEDULE_EMOTE).equals(v)) {
             this.entityData.set(DATA_SCHEDULE_EMOTE, v);
         }
@@ -1846,6 +1870,10 @@ public class CompanionEntity extends PathfinderMob
                 followMode = com.withouthonor.npcs.common.entity.ai.FollowMode.NONE;
             }
 
+            if (tickCount % 20 == 17) {
+                tickBoatRide();
+            }
+
             if (cfgScheduleGlobal && tickCount % 40 == 13 && scheduleActive()
                     && level().getServer() != null) {
                 com.withouthonor.npcs.common.storage.GlobalScheduleManager
@@ -1871,6 +1899,45 @@ public class CompanionEntity extends PathfinderMob
                 this.yHeadRotO = 0F;
             }
         }
+    }
+
+    /** Поездка в лодке вместе с игроком (v1): садимся к сопровождаемому, выходим следом. */
+    private void tickBoatRide() {
+        Player p = followedPlayer();
+        if (isPassenger()) {
+            if (getVehicle() instanceof net.minecraft.world.entity.vehicle.Boat
+                    && (!cfgBoatRide || p == null || p.getVehicle() != getVehicle())) {
+                stopRiding();
+            }
+            return;
+        }
+        if (!cfgBoatRide || p == null) {
+            return;
+        }
+        if (p.getVehicle() instanceof net.minecraft.world.entity.vehicle.Boat boat
+                && boat.getPassengers().size() < 2
+                && distanceToSqr(boat) < 64.0D) {
+            startRiding(boat);
+        }
+    }
+
+    /** Игрок, за которым NPC идёт прямо сейчас: разовое следование (диалог)
+     *  или постоянное «за игроком» (AutoFollowGoal, только когда разовое неактивно). */
+    @javax.annotation.Nullable
+    private Player followedPlayer() {
+        if (followMode == com.withouthonor.npcs.common.entity.ai.FollowMode.FOLLOW) {
+            return getFollowTarget();
+        }
+        if (followMode == com.withouthonor.npcs.common.entity.ai.FollowMode.NONE
+                && "player".equals(cfgAutoFollowMode) && !cfgAutoFollowTarget.isBlank()
+                && level() instanceof net.minecraft.server.level.ServerLevel sl) {
+            // Резолвим так же, как AutoFollowGoal.resolveTarget: по нику, живой, в том же мире
+            ServerPlayer sp = sl.getServer().getPlayerList().getPlayerByName(cfgAutoFollowTarget);
+            if (sp != null && sp.isAlive() && sp.level() == level()) {
+                return sp;
+            }
+        }
+        return null;
     }
 
     private static float turnTowards(float from, float to, float maxDelta) {
@@ -2059,6 +2126,24 @@ public class CompanionEntity extends PathfinderMob
         nextAmbientAt = now + cooldownMs + this.random.nextInt((int) (cooldownMs / 2) + 1);
     }
 
+    // КД реплик/эмоций диалогов: wall-clock, не сохраняется — как nextAmbientAt.
+    private final java.util.Map<String, Long> sayCooldowns = new java.util.HashMap<>();
+
+    /** true — КД по ключу истёк (и ставит новый); false — ещё не время. */
+    public boolean trySayCooldown(String key, long cdMs) {
+        long now = System.currentTimeMillis();
+        Long expiry = sayCooldowns.get(key);
+        if (expiry != null && now < expiry) {
+            return false;
+        }
+        if (sayCooldowns.size() > 256) {
+            // Не даём карте расти бесконечно: сперва чистим истёкшие записи.
+            sayCooldowns.values().removeIf(v -> now >= v);
+        }
+        sayCooldowns.put(key, now + cdMs);
+        return true;
+    }
+
     private int nextCombatPhraseAt;
 
     private void speakFromPool(CompanionProfile profile, java.util.List<String> pool,
@@ -2082,7 +2167,7 @@ public class CompanionEntity extends PathfinderMob
         }
     }
 
-    private void broadcastPhraseChat(String text) {
+    public void broadcastPhraseChat(String text) {
         if (!(level() instanceof net.minecraft.server.level.ServerLevel sl)) {
             return;
         }
@@ -2197,14 +2282,37 @@ public class CompanionEntity extends PathfinderMob
         this.entityData.set(DATA_EMOTECRAFT_EMOTE, packEmote(emoteId, emoteName, emoteAuthor));
     }
 
+    public void sendEmotecraftEmote(String emoteId, String emoteName, String emoteAuthor, int nonce) {
+        this.entityData.set(DATA_EMOTECRAFT_EMOTE, packEmote(emoteId, emoteName, emoteAuthor, nonce));
+    }
+
+    // Счётчик nonce диалоговых эмоций: делает строку уникальной для перезапуска.
+    private int dialogueEmoteNonce;
+
+    public int nextDialogueEmoteNonce() {
+        if (++dialogueEmoteNonce == 0) {
+            dialogueEmoteNonce = 1;
+        }
+        return dialogueEmoteNonce;
+    }
+
     private static final char EMOTE_SEP = (char) 31;
 
     public static String packEmote(String id, String name, String author) {
+        return packEmote(id, name, author, 0);
+    }
+
+    public static String packEmote(String id, String name, String author, int nonce) {
         if (id == null || id.isEmpty()) {
             return "";
         }
         String n = name == null ? "" : name;
         String a = author == null ? "" : author;
+        if (nonce != 0) {
+            // 4-й сегмент клиент игнорирует: reconcile читает только parts[0..2],
+            // но смена nonce меняет строку целиком и заставляет проиграть заново.
+            return id + EMOTE_SEP + n + EMOTE_SEP + a + EMOTE_SEP + nonce;
+        }
         if (n.isEmpty() && a.isEmpty()) {
             return id;
         }
@@ -2340,6 +2448,13 @@ public class CompanionEntity extends PathfinderMob
         if (server != null) {
             com.withouthonor.npcs.common.storage.Graveyard.get(server).record(this, profile);
         }
+    }
+
+    @Override
+    public double getMyRidingOffset() {
+        // Как у игрока (−0.35): иначе в лодке NPC сидит заметно выше соседа-игрока.
+        return getVehicle() instanceof net.minecraft.world.entity.vehicle.Boat ? -0.35D
+                : super.getMyRidingOffset();
     }
 
     @Override

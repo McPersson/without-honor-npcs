@@ -243,7 +243,11 @@ public final class Actions {
         }
     }
 
-    public record Say(String text) implements DialogueAction {
+    public record Say(String text, boolean toChat, String cdScope, int cooldownSec) implements DialogueAction {
+
+        public Say(String text) {
+            this(text, false, "npc", 0);
+        }
 
         @Override
         public String type() {
@@ -252,13 +256,30 @@ public final class Actions {
 
         @Override
         public void execute(DialogueCondition.Context ctx) {
-            if (ctx.npc() != null && !text.isBlank()) {
-                ctx.npc().sendBubble(Placeholders.apply(text, ctx));
+            if (ctx.npc() == null || text.isBlank()) {
+                return;
+            }
+            if (cooldownSec > 0) {
+                // КД: "npc" — один на всех, "player" — у каждого игрока свой ключ.
+                String key = ("player".equals(cdScope) ? ctx.player().getUUID() + "|" : "")
+                        + Integer.toHexString(text.hashCode());
+                if (!ctx.npc().trySayCooldown(key, cooldownSec * 1000L)) {
+                    return;
+                }
+            }
+            String resolved = Placeholders.apply(text, ctx);
+            ctx.npc().sendBubble(resolved);
+            if (toChat) {
+                ctx.npc().broadcastPhraseChat(resolved);
             }
         }
 
         public static Say fromJson(JsonObject json) {
-            return new Say(json.get("text").getAsString());
+            // Отсутствующие поля = старое поведение: только бабл, без КД.
+            return new Say(json.get("text").getAsString(),
+                    json.has("to_chat") && json.get("to_chat").getAsBoolean(),
+                    json.has("cd_scope") ? json.get("cd_scope").getAsString() : "npc",
+                    json.has("cooldown") ? json.get("cooldown").getAsInt() : 0);
         }
 
         @Override
@@ -266,6 +287,13 @@ public final class Actions {
             JsonObject json = new JsonObject();
             json.addProperty("type", type());
             json.addProperty("text", text);
+            if (toChat) {
+                json.addProperty("to_chat", true);
+            }
+            if (cooldownSec > 0) {
+                json.addProperty("cooldown", cooldownSec);
+                json.addProperty("cd_scope", "player".equals(cdScope) ? "player" : "npc");
+            }
             return json;
         }
     }
@@ -298,10 +326,16 @@ public final class Actions {
         }
     }
 
-    public record EmotecraftEmote(String emoteId, String emoteName, String emoteAuthor) implements DialogueAction {
+    public record EmotecraftEmote(String emoteId, String emoteName, String emoteAuthor,
+                                  String mode, int cooldownSec) implements DialogueAction {
 
         public EmotecraftEmote(String emoteId) {
             this(emoteId, "", "");
+        }
+
+        public EmotecraftEmote(String emoteId, String emoteName, String emoteAuthor) {
+            // "once" = старое поведение: повтор той же эмоции не перезапускается.
+            this(emoteId, emoteName, emoteAuthor, "once", 60);
         }
 
         @Override
@@ -311,16 +345,31 @@ public final class Actions {
 
         @Override
         public void execute(DialogueCondition.Context ctx) {
-            if (ctx.npc() != null) {
-                ctx.npc().sendEmotecraftEmote(emoteId, emoteName, emoteAuthor);
+            if (ctx.npc() == null) {
+                return;
+            }
+            switch (mode) {
+                case "always" -> ctx.npc().sendEmotecraftEmote(emoteId, emoteName, emoteAuthor,
+                        ctx.npc().nextDialogueEmoteNonce());
+                case "cooldown" -> {
+                    if (ctx.npc().trySayCooldown("emote|" + emoteId,
+                            Math.max(1, cooldownSec) * 1000L)) {
+                        ctx.npc().sendEmotecraftEmote(emoteId, emoteName, emoteAuthor,
+                                ctx.npc().nextDialogueEmoteNonce());
+                    }
+                }
+                default -> ctx.npc().sendEmotecraftEmote(emoteId, emoteName, emoteAuthor);
             }
         }
 
         public static EmotecraftEmote fromJson(JsonObject json) {
+            // Отсутствующие поля = старое поведение ("once").
             return new EmotecraftEmote(
                     json.has("emote_id") ? json.get("emote_id").getAsString() : "",
                     json.has("emote_name") ? json.get("emote_name").getAsString() : "",
-                    json.has("emote_author") ? json.get("emote_author").getAsString() : "");
+                    json.has("emote_author") ? json.get("emote_author").getAsString() : "",
+                    json.has("mode") ? json.get("mode").getAsString() : "once",
+                    json.has("cooldown") ? json.get("cooldown").getAsInt() : 60);
         }
 
         @Override
@@ -333,6 +382,12 @@ public final class Actions {
             }
             if (emoteAuthor != null && !emoteAuthor.isEmpty()) {
                 json.addProperty("emote_author", emoteAuthor);
+            }
+            if (!"once".equals(mode)) {
+                json.addProperty("mode", mode);
+                if ("cooldown".equals(mode)) {
+                    json.addProperty("cooldown", cooldownSec);
+                }
             }
             return json;
         }

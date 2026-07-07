@@ -75,7 +75,7 @@ public class ClientImportPacket {
                 }
                 DialogueManager.get().save(graph);
                 NetworkHandler.sendToPlayer(
-                        new DialogueListPacket(EditorDataPacket.buildSummaries()), sender);
+                        new DialogueListPacket(EditorDataPacket.buildSummaries(sender.server)), sender);
                 sender.sendSystemMessage(Component.translatable("wh_npcs.msg.dialogue.saved", graph.getId()));
             } else {
                 if (!(sender.serverLevel().getEntity(p.entityId) instanceof CompanionEntity npc)

@@ -29,6 +29,7 @@ public final class ConditionTypes {
         register("time", Conditions.Time::fromJson);
         register("player_state", Conditions.PlayerState::fromJson);
         register("npc_health", Conditions.NpcHealth::fromJson);
+        register("player_level", Conditions.PlayerLevel::fromJson);
     }
 
     private ConditionTypes() {
