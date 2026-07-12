@@ -294,8 +294,15 @@ public class PhrasesEditorScreen extends ScaledScreen {
 
         VanillaUIHelper.drawContentPanel(g, winX + PAD, listY, winW - PAD * 2, listH);
         if (pool().isEmpty()) {
-            g.drawCenteredString(font, "§8" + Component.translatable(CAT_HINT[activeCat]).getString(),
-                    winX + winW / 2, listY + listH / 2 - 4, VanillaUIHelper.TEXT_WHITE);
+            // Перенос по ширине панели — длинный перевод не липнет к краям, а идёт в неск. строк.
+            java.util.List<net.minecraft.util.FormattedCharSequence> lines = font.split(
+                    Component.translatable(CAT_HINT[activeCat]).withStyle(net.minecraft.ChatFormatting.DARK_GRAY),
+                    winW - PAD * 2 - 24);
+            int hy = listY + listH / 2 - 4 - (lines.size() - 1) * 5;
+            for (net.minecraft.util.FormattedCharSequence line : lines) {
+                g.drawCenteredString(font, line, winX + winW / 2, hy, VanillaUIHelper.TEXT_WHITE);
+                hy += 10;
+            }
         }
         int visible = visibleRows();
         scroll = Math.max(0, Math.min(scroll, Math.max(0, pool().size() - visible)));

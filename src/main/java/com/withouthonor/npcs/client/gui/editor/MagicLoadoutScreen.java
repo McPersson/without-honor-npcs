@@ -26,8 +26,9 @@ import java.util.Map;
  * Экран лоадаута мага (Iron's Spells). Пикер спеллов с иконками и цветом школы, категория на
  * каждый спелл (attack/defense/movement/support → 4 списка WizardAttackGoal.setSpells), тумблеры
  * «отступать»/«заклинания с оружия», скрабы силы и интервала. Спеллы из спеллбука в Curios-слоте
- * "spellbook" NPC показываются read-only строками с пометкой «из книги» (книга в слоте = активны,
- * сервер добавляет их в пул атаки сам — см. IronsSpellsBridgeImpl.buildMageGoal).
+ * "spellbook" NPC показываются отдельными строками (книга в слоте = активны): сам спелл менять
+ * нельзя, но категорию и вес можно — они хранятся оверрайдами по id спелла (magic.book_overrides),
+ * см. IronsSpellsBridgeImpl.resolveExtraSpells.
  * Читает/пишет profileJson.magic. ISS-типы не линкует — данные берёт через мост (SpellInfo).
  */
 public class MagicLoadoutScreen extends ScaledScreen {
@@ -54,6 +55,9 @@ public class MagicLoadoutScreen extends ScaledScreen {
     // Спеллы из книги в Curios-слоте "spellbook" — read-only: активны, пока книга в слоте.
     private final java.util.Set<String> bookIds = new java.util.LinkedHashSet<>();
     private final Map<String, Integer> weights = new LinkedHashMap<>(); // id -> вес 1..3; храним только != 1
+    // Оверрайды книжных спеллов по id: категория (храним только != attack) и вес (только != 1).
+    private final Map<String, String> bookCats = new LinkedHashMap<>();
+    private final Map<String, Integer> bookWeights = new LinkedHashMap<>();
     private boolean flee;
     private boolean fromWeapon;
     private boolean supportAllies;
@@ -113,6 +117,24 @@ public class MagicLoadoutScreen extends ScaledScreen {
                 int w = s.has("weight") ? Math.max(1, Math.min(3, s.get("weight").getAsInt())) : 1;
                 if (w != 1) {
                     weights.put(id, w);
+                }
+            }
+        }
+        bookCats.clear();
+        bookWeights.clear();
+        if (m.has("book_overrides")) {
+            for (Map.Entry<String, JsonElement> e : m.getAsJsonObject("book_overrides").entrySet()) {
+                JsonObject o = e.getValue().getAsJsonObject();
+                String cat = o.has("category") ? o.get("category").getAsString() : "attack";
+                if ("support".equals(cat)) {
+                    cat = "support_heal"; // легаси-категория
+                }
+                int w = o.has("weight") ? Math.max(1, Math.min(3, o.get("weight").getAsInt())) : 1;
+                if (!"attack".equals(cat)) {
+                    bookCats.put(e.getKey(), cat);
+                }
+                if (w != 1) {
+                    bookWeights.put(e.getKey(), w);
                 }
             }
         }
@@ -316,17 +338,14 @@ public class MagicLoadoutScreen extends ScaledScreen {
             g.blit(e.icon(), winX + PAD + 22, y, 0.0F, 0.0F, 16, 16, 16, 16);
             g.drawString(font, font.plainSubstrByWidth(e.name(), nameW), winX + PAD + 44, y + 4,
                     on ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE, false);
-            if (book) {
-                // Вместо кнопок категории/веса — пометка «из книги»; тултип объясняет read-only.
-                String badge = "§d" + tr("wh_npcs.ui.magic.book_badge");
-                g.drawString(font, badge, wBtnX + wBtnW - font.width(badge), y + 4,
-                        VanillaUIHelper.TEXT_WHITE, false);
-                if (hov) {
-                    hoverTooltip = tr("wh_npcs.ui.magic.book_row_tip");
-                }
+            // Пометка «из книги» на строке (тултип объясняет, что сам спелл задан книгой).
+            if (book && hov) {
+                hoverTooltip = tr("wh_npcs.ui.magic.book_row_tip");
             }
-            if (on) {
-                String cat = loadout.get(e.id());
+            // Кнопки категории/веса — и у ручных строк, и у книжных: книжные берут значения из
+            // оверрайдов по id (дефолт attack/×1), сам спелл при этом менять нельзя.
+            if (on || book) {
+                String cat = on ? loadout.get(e.id()) : bookCat(e.id());
                 boolean chov = isOver(mouseX, mouseY, catBtnX, y + 1, catBtnW, 14);
                 VanillaUIHelper.drawButton(g, catBtnX, y + 1, catBtnW, 14, chov);
                 g.drawCenteredString(font, catLabel(cat), catBtnX + catBtnW / 2, y + 4, catColor(cat));
@@ -334,7 +353,7 @@ public class MagicLoadoutScreen extends ScaledScreen {
                     hoverTooltip = tr("wh_npcs.ui.magic.cat_tip");
                 }
                 // Вес «×N»: серый при дефолте ×1, жёлтый при усилении
-                int wgt = weights.getOrDefault(e.id(), 1);
+                int wgt = on ? weights.getOrDefault(e.id(), 1) : bookWeight(e.id());
                 boolean whov = isOver(mouseX, mouseY, wBtnX, y + 1, wBtnW, 14);
                 VanillaUIHelper.drawButton(g, wBtnX, y + 1, wBtnW, 14, whov);
                 g.drawCenteredString(font, "×" + wgt, wBtnX + wBtnW / 2, y + 4,
@@ -437,6 +456,17 @@ public class MagicLoadoutScreen extends ScaledScreen {
                     }
                     return true;
                 }
+                // Книжная строка: тот же «×N», но пишем в оверрайды по id.
+                if (!loadout.containsKey(e.id()) && bookIds.contains(e.id())
+                        && isOver(mouseX, mouseY, wBtnX, y + 1, wBtnW, 14)) {
+                    int wgt = button == 1 ? 1 : bookWeight(e.id()) % 3 + 1;
+                    if (wgt == 1) {
+                        bookWeights.remove(e.id());
+                    } else {
+                        bookWeights.put(e.id(), wgt);
+                    }
+                    return true;
+                }
             }
         }
         if (button != 0) {
@@ -465,9 +495,15 @@ public class MagicLoadoutScreen extends ScaledScreen {
                 cycleCategory(e.id());
                 return true;
             }
+            // Книжная строка: категорию можно менять (пишется в оверрайды), сам спелл — нет.
+            if (!loadout.containsKey(e.id()) && bookIds.contains(e.id())
+                    && isOver(mouseX, mouseY, catBtnX, y + 1, catBtnW, 14)) {
+                cycleBookCategory(e.id());
+                return true;
+            }
             if (isOver(mouseX, mouseY, winX + PAD + 2, y - 1, winW - PAD * 2 - 8, ROW_H)) {
                 setFocused(null);
-                // Книжная строка read-only: клик глотаем, управляется книгой в Curios-слоте.
+                // Книжная строка: членство задаёт книга в Curios-слоте, клик по строке не переключает.
                 if (!loadout.containsKey(e.id()) && bookIds.contains(e.id())) {
                     return true;
                 }
@@ -527,6 +563,31 @@ public class MagicLoadoutScreen extends ScaledScreen {
         loadout.put(id, CATS[(i + 1) % CATS.length]);
     }
 
+    private String bookCat(String id) {
+        return bookCats.getOrDefault(id, "attack");
+    }
+
+    private int bookWeight(String id) {
+        return bookWeights.getOrDefault(id, 1);
+    }
+
+    /** Цикл категории книжного спелла; attack — дефолт, в оверрайдах не храним (чистый JSON). */
+    private void cycleBookCategory(String id) {
+        String cur = bookCat(id);
+        int i = 0;
+        for (; i < CATS.length; i++) {
+            if (CATS[i].equals(cur)) {
+                break;
+            }
+        }
+        String next = CATS[(i + 1) % CATS.length];
+        if ("attack".equals(next)) {
+            bookCats.remove(id);
+        } else {
+            bookCats.put(id, next);
+        }
+    }
+
     @Override
     protected boolean mouseScrolledScaled(double mouseX, double mouseY, double delta) {
         recalc();
@@ -580,6 +641,26 @@ public class MagicLoadoutScreen extends ScaledScreen {
             arr.add(s);
         }
         m.add("spells", arr);
+        // Оверрайды книжных спеллов по id (только не-дефолтные категория/вес). Висят даже без книги
+        // в слоте — применяются, лишь когда спелл реально в пуле.
+        java.util.Set<String> bookIdsUnion = new java.util.LinkedHashSet<>();
+        bookIdsUnion.addAll(bookCats.keySet());
+        bookIdsUnion.addAll(bookWeights.keySet());
+        if (bookIdsUnion.isEmpty()) {
+            m.remove("book_overrides");
+        } else {
+            JsonObject bo = new JsonObject();
+            for (String id : bookIdsUnion) {
+                JsonObject o = new JsonObject();
+                o.addProperty("category", bookCat(id));
+                int w = bookWeight(id);
+                if (w != 1) {
+                    o.addProperty("weight", w);
+                }
+                bo.add(id, o);
+            }
+            m.add("book_overrides", bo);
+        }
         m.addProperty("flee", flee);
         m.addProperty("spells_from_weapon", fromWeapon);
         // Гарантируем корректный порядок границ (мин ≤ макс), даже если ввели наоборот.

@@ -100,11 +100,13 @@ public class NpcWizardAttackGoal extends WizardAttackGoal {
     protected AbstractSpell getNextSpellType() {
         // Порядок фиксированный: attack, defense, movement, support (как у базы).
         List<ArrayList<AbstractSpell>> raw = List.of(attackSpells, defenseSpells, movementSpells, supportSpells);
+        int supportWeight = getSupportWeight() - (lastSpellCategory == supportSpells ? REPEAT_PENALTY_SUPPORT : 0);
+        supportWeight = applyProactiveBuffFloor(supportWeight);
         int[] weights = {
                 getAttackWeight(), // атаку после атаки не штрафуем: молотить боевыми подряд — норма
                 getDefenseWeight() - (lastSpellCategory == defenseSpells ? REPEAT_PENALTY_DEFENSE : 0),
                 getMovementWeight() - (lastSpellCategory == movementSpells ? REPEAT_PENALTY_MOVEMENT : 0),
-                getSupportWeight() - (lastSpellCategory == supportSpells ? REPEAT_PENALTY_SUPPORT : 0)
+                supportWeight
         };
         List<ArrayList<AbstractSpell>> pickRaw = new ArrayList<>(4);
         List<List<AbstractSpell>> pickCandidates = new ArrayList<>(4);
@@ -139,6 +141,31 @@ public class NpcWizardAttackGoal extends WizardAttackGoal {
             }
         }
         return SpellRegistry.none(); // недостижимо при total > 0, но контракт держим
+    }
+
+    /**
+     * #2 Проактивный самобафф. Родной getSupportWeight растёт только от нехватки HP, поэтому на
+     * полном здоровье баффы почти не выбирались (лечение и бафф делят один вес). Если среди
+     * самоподдержки есть кастуемый бафф, которого на NPC ещё нет, поднимаем вес поддержки до уровня
+     * атаки — маг успевает забаффаться в начале боя. Как только баффы наложены, filterCastable их
+     * убирает, кастуемых баффов не остаётся, и вес поддержки возвращается к лечению (по HP как в ISS).
+     */
+    private int applyProactiveBuffFloor(int supportWeight) {
+        int floor = getAttackWeight();
+        if (supportWeight >= floor) {
+            return supportWeight;
+        }
+        for (AbstractSpell spell : supportSpells) {
+            MobEffect buff = NpcBuffTable.effectFor(spell);
+            if (buff == null || mob.hasEffect(buff)) {
+                continue; // не бафф либо уже висит
+            }
+            if (target != null && spell.shouldAIStopCasting(1, mob, target)) {
+                continue; // сейчас не скастуется
+            }
+            return floor; // есть кастуемый неналоженный самобафф → поднять вес поддержки
+        }
+        return supportWeight;
     }
 
     /** Кандидаты категории после анти-перекаста и проверки дальности. */

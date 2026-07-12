@@ -203,6 +203,10 @@ public class CompanionProfile {
     private boolean magicSpellsFromWeapon;      // добавлять imbued-спеллы с держимого предмета
     /** id атрибута ISS → базовое значение (нейтраль 1.0, в профиле только отличия от неё). */
     private final Map<String, Double> magicAttrs = new LinkedHashMap<>();
+    /** Оверрайды категории/веса для спеллов ИЗ КНИГИ/оружия по id спелла (не по слоту): книга
+     *  хранит только id+уровень, категорию/вес взять неоткуда — задаём их здесь. Ключ = id спелла,
+     *  применяется, только когда спелл реально в пуле (книга в слоте). id в ручном лоадауте главнее. */
+    private final Map<String, MagicSpell> bookOverrides = new LinkedHashMap<>();
 
     private float regenPerSecond;
 
@@ -283,6 +287,13 @@ public class CompanionProfile {
     private float deathEmoteSecs = 3.0F;
 
     private String mobType = "undefined";
+    // «Тип существа» для реакции мобов (0.9.5 #4): как ванильные/модовые мобы воспринимают NPC
+    // (кто его бьёт/защищает). Ортогонален mobType (тот — про урон зачарований). Дефолт «нейтрал».
+    private String creatureType = "neutral";
+    // Кастом-тип: id групп-атакующих (MobGroup), заданные вручную. Применяется только при creature_type=custom.
+    private final List<String> creatureCustomAttackers = new ArrayList<>();
+    // «Природная вражда» по типу между НАШИМИ NPC (нежить бьёт жителя, житель боится нежить). Дефолт вкл.
+    private boolean naturalHostility = true;
 
     private boolean fallDamage = true;
 
@@ -690,6 +701,16 @@ public class CompanionProfile {
 
     public List<MagicSpell> getMagicSpells() {
         return magicSpells;
+    }
+
+    /** Оверрайды книжных спеллов (id спелла → категория/вес). Изменяемая карта: UI пишет прямо в неё. */
+    public Map<String, MagicSpell> getBookOverrides() {
+        return bookOverrides;
+    }
+
+    /** Оверрайд для книжного спелла по id, либо null — тогда дефолт (атака, вес 1). */
+    public MagicSpell bookOverride(String spellId) {
+        return bookOverrides.get(spellId);
     }
 
     /** Базовое значение атрибута ISS; 1.0 — нейтраль, если в профиле ничего не задано. */
@@ -1118,6 +1139,21 @@ public class CompanionProfile {
         return mobType;
     }
 
+    /** «Тип существа» для реакции мобов (neutral/villager/undead/piglin/bandit/custom). */
+    public String getCreatureType() {
+        return creatureType;
+    }
+
+    /** id групп-атакующих для кастом-типа (изменяемый список; UI пишет прямо в него). */
+    public List<String> getCreatureCustomAttackers() {
+        return creatureCustomAttackers;
+    }
+
+    /** «Природная вражда» по типу между NPC (дефолт вкл). */
+    public boolean isNaturalHostility() {
+        return naturalHostility;
+    }
+
     public boolean isFallDamage() {
         return fallDamage;
     }
@@ -1515,6 +1551,21 @@ public class CompanionProfile {
         if (json.has("death_emote_secs")) {
             profile.setDeathEmoteSecs(json.get("death_emote_secs").getAsFloat());
         }
+        if (json.has("creature_type")) {
+            profile.creatureType = json.get("creature_type").getAsString();
+        }
+        if (json.has("creature_custom_attackers")) {
+            for (JsonElement e : json.getAsJsonArray("creature_custom_attackers")) {
+                try {
+                    profile.creatureCustomAttackers.add(e.getAsString());
+                } catch (RuntimeException ex) {
+                    WHCompanions.LOGGER.warn("Profile creature_custom_attackers: bad element skipped");
+                }
+            }
+        }
+        if (json.has("natural_hostility")) {
+            profile.naturalHostility = json.get("natural_hostility").getAsBoolean();
+        }
         if (json.has("mob_type")) {
             profile.mobType = json.get("mob_type").getAsString();
         }
@@ -1592,13 +1643,17 @@ public class CompanionProfile {
             if (magic.has("attrs")) {
                 // Атрибуты храним по строковому id; резолв — только при применении (план §3.1).
                 for (Map.Entry<String, JsonElement> e : magic.getAsJsonObject("attrs").entrySet()) {
-                    double v = e.getValue().getAsDouble();
-                    if (!Double.isFinite(v)) {
-                        WHCompanions.LOGGER.warn("Profile magic attr '{}': non-finite value, skipped", e.getKey());
-                        continue;
+                    try {
+                        double v = e.getValue().getAsDouble();
+                        if (!Double.isFinite(v)) {
+                            WHCompanions.LOGGER.warn("Profile magic attr '{}': non-finite value, skipped", e.getKey());
+                            continue;
+                        }
+                        // UI даёт −100..+100% → множитель 0..2.
+                        profile.magicAttrs.put(e.getKey(), Math.max(0.0D, Math.min(2.0D, v)));
+                    } catch (RuntimeException ex) {
+                        WHCompanions.LOGGER.warn("Profile magic attr '{}': bad value skipped", e.getKey());
                     }
-                    // UI даёт −100..+100% → множитель 0..2.
-                    profile.magicAttrs.put(e.getKey(), Math.max(0.0D, Math.min(2.0D, v)));
                 }
             }
             if (magic.has("spells")) {
@@ -1608,9 +1663,26 @@ public class CompanionProfile {
                 // задвоенный id — задвоенный вес спелла в пулах WizardAttackGoal.
                 java.util.Set<String> seenSpellIds = new java.util.HashSet<>();
                 for (JsonElement e : magic.getAsJsonArray("spells")) {
-                    MagicSpell ms = MagicSpell.fromJson(e.getAsJsonObject());
-                    if (seenSpellIds.add(ms.id())) {
-                        profile.magicSpells.add(ms);
+                    try {
+                        MagicSpell ms = MagicSpell.fromJson(e.getAsJsonObject());
+                        if (seenSpellIds.add(ms.id())) {
+                            profile.magicSpells.add(ms);
+                        }
+                    } catch (RuntimeException ex) {
+                        WHCompanions.LOGGER.warn("Profile magic spell: bad element skipped");
+                    }
+                }
+            }
+            if (magic.has("book_overrides")) {
+                // Ключ — id спелла; значение {category, weight}. Клампы веса как у ручного лоадаута.
+                for (Map.Entry<String, JsonElement> e : magic.getAsJsonObject("book_overrides").entrySet()) {
+                    try {
+                        JsonObject o = e.getValue().getAsJsonObject();
+                        String cat = o.has("category") ? o.get("category").getAsString() : "attack";
+                        int w = o.has("weight") ? Math.max(1, Math.min(3, o.get("weight").getAsInt())) : 1;
+                        profile.bookOverrides.put(e.getKey(), new MagicSpell(e.getKey(), cat, w));
+                    } catch (RuntimeException ex) {
+                        WHCompanions.LOGGER.warn("Profile book_override '{}': bad entry skipped", e.getKey());
                     }
                 }
             }
@@ -1865,6 +1937,17 @@ public class CompanionProfile {
             json.addProperty("death_emote_author", deathEmoteAuthor);
             json.addProperty("death_emote_secs", deathEmoteSecs);
         }
+        if (!"neutral".equals(creatureType)) {
+            json.addProperty("creature_type", creatureType);
+        }
+        if (!creatureCustomAttackers.isEmpty()) {
+            JsonArray arr = new JsonArray();
+            creatureCustomAttackers.forEach(arr::add);
+            json.add("creature_custom_attackers", arr);
+        }
+        if (!naturalHostility) {
+            json.addProperty("natural_hostility", false); // дефолт true не пишем
+        }
         if (!"undefined".equals(mobType)) {
             json.addProperty("mob_type", mobType);
         }
@@ -1948,7 +2031,7 @@ public class CompanionProfile {
         // Секцию пишем и при пустом лоадауте, если интервалы/качество отличаются от дефолтов:
         // иначе настроенные крутилки без спеллов терялись бы при раунд-трипе JSON.
         if (!magicSpells.isEmpty() || magicFlee || magicSpellsFromWeapon
-                || !magicAttrs.isEmpty()
+                || !magicAttrs.isEmpty() || !bookOverrides.isEmpty()
                 || magicMinInterval != MAGIC_MIN_INTERVAL_DEFAULT
                 || magicMaxInterval != MAGIC_MAX_INTERVAL_DEFAULT
                 || magicMinQuality != MAGIC_MIN_QUALITY_DEFAULT
@@ -1973,6 +2056,18 @@ public class CompanionProfile {
                 JsonObject attrs = new JsonObject();
                 magicAttrs.forEach(attrs::addProperty);
                 magic.add("attrs", attrs);
+            }
+            if (!bookOverrides.isEmpty()) {
+                JsonObject bo = new JsonObject();
+                bookOverrides.forEach((id, ms) -> {
+                    JsonObject o = new JsonObject();
+                    o.addProperty("category", ms.category());
+                    if (ms.weight() != 1) {
+                        o.addProperty("weight", ms.weight()); // дефолтный вес 1 не пишем
+                    }
+                    bo.add(id, o);
+                });
+                magic.add("book_overrides", bo);
             }
             json.add("magic", magic);
         }

@@ -20,6 +20,12 @@ public class ServerEvents {
         WhcCommand.register(event.getDispatcher());
     }
 
+    @SubscribeEvent
+    public static void onServerAboutToStart(net.minecraftforge.event.server.ServerAboutToStartEvent event) {
+        // Сброс счётчика «атакуемых» NPC — от дрейфа между мирами в одном процессе (одиночная игра).
+        com.withouthonor.npcs.common.entity.ai.CreatureAggroState.reset();
+    }
+
     /**
      * Дружественный огонь (#6). Отменяем ДО нокбека/звука на LivingAttackEvent. Атакер — владелец
      * снаряда/кастер (event.getSource().getEntity()), покрывает стрелы/копья(setOwner)/ISS-касты.
@@ -90,7 +96,10 @@ public class ServerEvents {
 
     @SubscribeEvent
     public static void onEntityJoinLevel(EntityJoinLevelEvent event) {
-        if (!event.getLevel().isClientSide && event.getEntity() instanceof CompanionEntity companion) {
+        if (event.getLevel().isClientSide) {
+            return;
+        }
+        if (event.getEntity() instanceof CompanionEntity companion) {
             companion.updateIndex();
 
             if (companion.getProfileId() != null) {
@@ -103,6 +112,25 @@ public class ServerEvents {
                     companion.setPose(profile);
                     companion.applyCombatProfile(profile);
                 }
+            }
+            return;
+        }
+        // 0.9.5 #4: чужому мобу вешаем цели по «Типу существа». Дёшевы при отсутствии подходящих NPC
+        // (canUse гейтится счётчиком); предикаты решают по типу конкретного NPC. Дедуп — на повторный join.
+        if (event.getEntity() instanceof net.minecraft.world.entity.Mob mob) {
+            if (com.withouthonor.npcs.common.entity.ai.WhCreatureAggroGoal.isPotentialAttacker(mob)
+                    && mob.targetSelector.getAvailableGoals().stream().noneMatch(
+                            wg -> wg.getGoal() instanceof com.withouthonor.npcs.common.entity.ai.WhCreatureAggroGoal)) {
+                mob.targetSelector.addGoal(
+                        com.withouthonor.npcs.common.entity.ai.WhCreatureAggroGoal.PRIORITY,
+                        new com.withouthonor.npcs.common.entity.ai.WhCreatureAggroGoal(mob));
+            }
+            if (com.withouthonor.npcs.common.entity.ai.WhCreatureDefendGoal.isPotentialDefender(mob)
+                    && mob.targetSelector.getAvailableGoals().stream().noneMatch(
+                            wg -> wg.getGoal() instanceof com.withouthonor.npcs.common.entity.ai.WhCreatureDefendGoal)) {
+                mob.targetSelector.addGoal(
+                        com.withouthonor.npcs.common.entity.ai.WhCreatureDefendGoal.PRIORITY,
+                        new com.withouthonor.npcs.common.entity.ai.WhCreatureDefendGoal(mob));
             }
         }
     }

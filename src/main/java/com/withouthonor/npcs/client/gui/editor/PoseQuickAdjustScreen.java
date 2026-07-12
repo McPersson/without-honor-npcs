@@ -68,7 +68,7 @@ public class PoseQuickAdjustScreen extends ScaledScreen {
     }
 
     private static final int WIN_W = 276;
-    private static final int WIN_H = 92;
+    private static final int WIN_H = 72;
 
     @Override
     protected int designW() {
@@ -175,10 +175,6 @@ public class PoseQuickAdjustScreen extends ScaledScreen {
             gr.drawCenteredString(font, AXIS_LABELS[i], boxX(i) + BOX_W / 2, winY + 56,
                     VanillaUIHelper.TEXT_DARK_GRAY);
         }
-        gr.drawString(font, positionMode
-                        ? Component.translatable("wh_npcs.ui.pose_quick.note_pos").getString()
-                        : Component.translatable("wh_npcs.ui.pose_quick.note_rot").getString(),
-                winX + 16, winY + 74, VanillaUIHelper.TEXT_WHITE, false);
     }
 
     private void stepper(GuiGraphics gr, int i, int mouseX, int mouseY) {

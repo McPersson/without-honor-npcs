@@ -258,11 +258,17 @@ public class PortraitPickerScreen extends ScaledScreen {
         }
         List<ImageStore.ImageInfo> files = displayed();
         if (files.isEmpty()) {
-            g.drawCenteredString(font, Component.translatable("wh_npcs.ui.portrait.no_png").getString(), winX + PAD + LIST_W / 2,
+            int cxp = winX + PAD + LIST_W / 2;
+            g.drawCenteredString(font, Component.translatable("wh_npcs.ui.portrait.no_png").getString(), cxp,
                     filesY + filesH / 2 - 8, VanillaUIHelper.TEXT_WHITE);
             if (isLocalWorld()) {
-                g.drawCenteredString(font, Component.translatable("wh_npcs.ui.portrait.no_png_hint").getString(), winX + PAD + LIST_W / 2,
-                        filesY + filesH / 2 + 4, VanillaUIHelper.TEXT_WHITE);
+                // Перенос по ширине панели — длинный перевод (DE/CJK) не обрезается, а идёт в неск. строк.
+                int hy = filesY + filesH / 2 + 4;
+                for (net.minecraft.util.FormattedCharSequence line : font.split(
+                        Component.translatable("wh_npcs.ui.portrait.no_png_hint"), LIST_W - 16)) {
+                    g.drawCenteredString(font, line, cxp, hy, VanillaUIHelper.TEXT_WHITE);
+                    hy += 10;
+                }
             }
             return;
         }

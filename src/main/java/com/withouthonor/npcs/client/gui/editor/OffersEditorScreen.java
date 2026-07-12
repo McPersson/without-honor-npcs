@@ -75,6 +75,8 @@ public class OffersEditorScreen extends ScaledScreen {
     private int carriedInvSlot = -1;
 
     private boolean confirmRestock;
+    // Прямоугольники кнопок поп-апа подтверждения (адаптивный размер) — считаются в рендере, юзаются в клике.
+    private int cfBtnY, cfOkX, cfCancelX;
 
     private EditBox maxUsesBox;
     private EditBox xpBox;
@@ -362,10 +364,16 @@ public class OffersEditorScreen extends ScaledScreen {
             hoverTooltip = Component.translatable("wh_npcs.ui.offers.restock_now.tip").getString();
         }
 
-        g.drawString(font, Component.translatable("wh_npcs.ui.offers.hint.count").getString(),
-                winX + PAD, bottomY - 7, VanillaUIHelper.TEXT_WHITE, false);
-        g.drawString(font, Component.translatable("wh_npcs.ui.offers.hint.slot").getString(),
-                winX + PAD, bottomY + 5, VanillaUIHelper.TEXT_WHITE, false);
+        // Подсказки не заезжают на кнопку «Готово»: режем «…», полный текст в тултипе по наведению.
+        String h1 = Component.translatable("wh_npcs.ui.offers.hint.count").getString();
+        String h2 = Component.translatable("wh_npcs.ui.offers.hint.slot").getString();
+        int hintW = (winX + winW - PAD - 80 - 8) - (winX + PAD);
+        g.drawString(font, ellipsize(h1, hintW), winX + PAD, bottomY - 7, VanillaUIHelper.TEXT_WHITE, false);
+        g.drawString(font, ellipsize(h2, hintW), winX + PAD, bottomY + 5, VanillaUIHelper.TEXT_WHITE, false);
+        if (isOver(mouseX, mouseY, winX + PAD, bottomY - 8, hintW, 24)
+                && (font.width(h1) > hintW || font.width(h2) > hintW)) {
+            hoverTooltip = h1 + "\n" + h2;
+        }
         drawSmall(g, Component.translatable("wh_npcs.ui.common.done").getString(), winX + winW - PAD - 80, bottomY, 80, mouseX, mouseY, VanillaUIHelper.TEXT_GREEN);
     }
 
@@ -391,21 +399,41 @@ public class OffersEditorScreen extends ScaledScreen {
         g.pose().pushPose();
         g.pose().translate(0, 0, 400);
         g.fill(winX, winY, winX + winW, winY + winH, 0xA0000000);
-        int w = 240;
-        int h = 78;
+        // Адаптивный размер: тело переносится по строкам, окно/кнопки подстраиваются, отступы равные.
+        int margin = 16;
+        int btnW = 80;
+        int btnGap = 12;
+        java.util.List<net.minecraft.util.FormattedCharSequence> body = font.split(
+                Component.translatable("wh_npcs.ui.offers.confirm_restock.body"), 320);
+        int bodyW = body.stream().mapToInt(font::width).max().orElse(0);
+        int titleW = font.width(Component.translatable("wh_npcs.ui.offers.confirm_restock.title").getString());
+        int contentW = Math.max(Math.max(bodyW, titleW), btnW * 2 + btnGap);
+        int w = Math.min(contentW + margin * 2, winW - 16); // не шире окна
+        int titleY, bodyY;
+        int h = margin + 10 /*title*/ + 8 + body.size() * 10 + 12 + 18 /*btn*/ + margin;
         int x = winX + (winW - w) / 2;
         int y = winY + (winH - h) / 2;
         VanillaUIHelper.drawWindow(g, x, y, w, h);
-        g.drawCenteredString(font, Component.translatable("wh_npcs.ui.offers.confirm_restock.title").getString(), x + w / 2, y + 10, VanillaUIHelper.TEXT_YELLOW);
-        g.drawCenteredString(font, Component.translatable("wh_npcs.ui.offers.confirm_restock.body").getString(), x + w / 2, y + 26, VanillaUIHelper.TEXT_WHITE);
-        boolean okHover = isOver(mouseX, mouseY, x + w / 2 - 86, y + h - 28, 80, 18);
-        boolean cancelHover = isOver(mouseX, mouseY, x + w / 2 + 6, y + h - 28, 80, 18);
-        VanillaUIHelper.drawButton(g, x + w / 2 - 86, y + h - 28, 80, 18, okHover);
-        VanillaUIHelper.drawButton(g, x + w / 2 + 6, y + h - 28, 80, 18, cancelHover);
-        g.drawCenteredString(font, Component.translatable("wh_npcs.ui.offers.confirm_restock.ok").getString(), x + w / 2 - 46, y + h - 23,
-                okHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
-        g.drawCenteredString(font, Component.translatable("wh_npcs.ui.common.cancel").getString(), x + w / 2 + 46, y + h - 23,
-                cancelHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE);
+        titleY = y + margin;
+        g.drawCenteredString(font, Component.translatable("wh_npcs.ui.offers.confirm_restock.title").getString(),
+                x + w / 2, titleY, VanillaUIHelper.TEXT_YELLOW);
+        bodyY = titleY + 18;
+        int by = bodyY;
+        for (net.minecraft.util.FormattedCharSequence line : body) {
+            g.drawCenteredString(font, line, x + w / 2, by, VanillaUIHelper.TEXT_WHITE);
+            by += 10;
+        }
+        cfBtnY = y + h - margin - 18;
+        cfOkX = x + (w - (btnW * 2 + btnGap)) / 2;
+        cfCancelX = cfOkX + btnW + btnGap;
+        boolean okHover = isOver(mouseX, mouseY, cfOkX, cfBtnY, btnW, 18);
+        boolean cancelHover = isOver(mouseX, mouseY, cfCancelX, cfBtnY, btnW, 18);
+        VanillaUIHelper.drawButton(g, cfOkX, cfBtnY, btnW, 18, okHover);
+        VanillaUIHelper.drawButton(g, cfCancelX, cfBtnY, btnW, 18, cancelHover);
+        g.drawCenteredString(font, Component.translatable("wh_npcs.ui.offers.confirm_restock.ok").getString(),
+                cfOkX + btnW / 2, cfBtnY + 5, okHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
+        g.drawCenteredString(font, Component.translatable("wh_npcs.ui.common.cancel").getString(),
+                cfCancelX + btnW / 2, cfBtnY + 5, cancelHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE);
         g.pose().popPose();
     }
 
@@ -443,6 +471,14 @@ public class OffersEditorScreen extends ScaledScreen {
         g.renderComponentTooltip(font, lines, x, y);
     }
 
+    /** Обрезка по ширине с «…», если не влезает (длинные переводы). */
+    private String ellipsize(String s, int maxW) {
+        if (font.width(s) <= maxW) {
+            return s;
+        }
+        return font.plainSubstrByWidth(s, Math.max(0, maxW - font.width("…"))) + "…";
+    }
+
     private void drawSmall(GuiGraphics g, String label, int x, int y, int w,
                            int mouseX, int mouseY, int color) {
         boolean hovered = isOver(mouseX, mouseY, x, y, w, 18);
@@ -457,11 +493,7 @@ public class OffersEditorScreen extends ScaledScreen {
 
         if (confirmRestock) {
             if (button == 0) {
-                int w = 240;
-                int h = 78;
-                int x = winX + (winW - w) / 2;
-                int y = winY + (winH - h) / 2;
-                if (isOver(mouseX, mouseY, x + w / 2 - 86, y + h - 28, 80, 18)) {
+                if (isOver(mouseX, mouseY, cfOkX, cfBtnY, 80, 18)) {
                     try {
                         java.util.UUID id = java.util.UUID.fromString(profileJson.get("id").getAsString());
                         com.withouthonor.npcs.network.NetworkHandler.sendToServer(
@@ -469,7 +501,7 @@ public class OffersEditorScreen extends ScaledScreen {
                     } catch (Exception ignored) {
                     }
                     confirmRestock = false;
-                } else if (isOver(mouseX, mouseY, x + w / 2 + 6, y + h - 28, 80, 18)) {
+                } else if (isOver(mouseX, mouseY, cfCancelX, cfBtnY, 80, 18)) {
                     confirmRestock = false;
                 }
             }

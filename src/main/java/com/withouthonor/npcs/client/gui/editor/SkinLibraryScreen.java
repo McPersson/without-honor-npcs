@@ -53,6 +53,46 @@ public class SkinLibraryScreen extends ScaledScreen {
         return labels;
     }
 
+    /** Обрезка по ширине с «…», если не влезает (длинные переводы). */
+    private String ellipsize(String s, int maxW) {
+        if (font.width(s) <= maxW) {
+            return s;
+        }
+        return font.plainSubstrByWidth(s, Math.max(0, maxW - font.width("…"))) + "…";
+    }
+
+    private static final class TabLayout {
+        int x, w;
+        String label, full;
+        boolean clipped;
+    }
+
+    /** Раскладка ряда вкладок: не заезжает за панель списка, длинные метки режутся «…» (для CJK/DE). */
+    private java.util.List<TabLayout> layoutTabs() {
+        java.util.List<TabLayout> out = new java.util.ArrayList<>();
+        String[] tabs = tabLabels();
+        int availRight = listX + LIST_W;
+        // Резервируем место под последнюю вкладку (♥) у правого края, чтобы её не выдавило текстовыми.
+        int lastNatural = font.width(tabs[tabs.length - 1]) + 14;
+        int tx = winX + 4;
+        for (int idx = 0; idx < tabs.length; idx++) {
+            String full = tabs[idx];
+            boolean last = idx == tabs.length - 1;
+            int limitRight = last ? availRight : availRight - lastNatural - 2;
+            int natural = font.width(full) + 14;
+            int tw = Math.min(natural, Math.max(20, limitRight - tx));
+            TabLayout tl = new TabLayout();
+            tl.x = tx;
+            tl.w = tw;
+            tl.full = full;
+            tl.clipped = tw < natural;
+            tl.label = tl.clipped ? ellipsize(full, tw - 14) : full;
+            out.add(tl);
+            tx += tw + 2;
+        }
+        return out;
+    }
+
     private static int lastTab;
 
     private final Screen parent;
@@ -173,15 +213,17 @@ public class SkinLibraryScreen extends ScaledScreen {
         g.fill(winX + 2, winY + 2, winX + winW - 2, winY + HEADER_H - 2, VanillaUIHelper.BG_HEADER);
         g.drawString(font, Component.translatable("wh_npcs.ui.skin_lib.title").getString(), winX + PAD, winY + 7, VanillaUIHelper.TEXT_YELLOW, false);
 
-        String[] tabs = tabLabels();
-        int tx = winX + 4;
-        for (int i = 0; i < tabs.length; i++) {
-            int tw = font.width(tabs[i]) + 14;
-            boolean hovered = isOver(mouseX, mouseY, tx, winY + HEADER_H, tw, TAB_H);
-            VanillaUIHelper.drawTab(g, tx, winY + HEADER_H, tw, TAB_H, tab == i, hovered);
-            g.drawString(font, tabs[i], tx + 7, winY + HEADER_H + 5,
+        java.util.List<TabLayout> tls = layoutTabs();
+        String tabBarTip = null;
+        for (int i = 0; i < tls.size(); i++) {
+            TabLayout tl = tls.get(i);
+            boolean hovered = isOver(mouseX, mouseY, tl.x, winY + HEADER_H, tl.w, TAB_H);
+            VanillaUIHelper.drawTab(g, tl.x, winY + HEADER_H, tl.w, TAB_H, tab == i, hovered);
+            g.drawString(font, tl.label, tl.x + 7, winY + HEADER_H + 5,
                     tab == i ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE, false);
-            tx += tw + 2;
+            if (hovered && tl.clipped) {
+                tabBarTip = tl.full;
+            }
         }
 
         VanillaUIHelper.drawContentPanel(g, listX, listY, LIST_W, listH);
@@ -193,6 +235,9 @@ public class SkinLibraryScreen extends ScaledScreen {
             case 4 -> renderNearbyTab(g, mouseX, mouseY);
             default -> renderFavoritesTab(g, mouseX, mouseY);
         };
+        if (tabBarTip != null) {
+            hoverTooltip = tabBarTip; // тултип обрезанной вкладки важнее (курсор над вкладкой, не над списком)
+        }
 
         renderPreview(g, mouseX, mouseY);
 
@@ -815,17 +860,15 @@ public class SkinLibraryScreen extends ScaledScreen {
                 commitRename();
             }
 
-            String[] tabs = tabLabels();
-            int tx = winX + 4;
-            for (int i = 0; i < tabs.length; i++) {
-                int tw = font.width(tabs[i]) + 14;
-                if (isOver(mouseX, mouseY, tx, winY + HEADER_H, tw, TAB_H)) {
+            java.util.List<TabLayout> tls = layoutTabs();
+            for (int i = 0; i < tls.size(); i++) {
+                TabLayout tl = tls.get(i);
+                if (isOver(mouseX, mouseY, tl.x, winY + HEADER_H, tl.w, TAB_H)) {
                     tab = i;
                     scroll = 0;
                     init(minecraft, width, height);
                     return true;
                 }
-                tx += tw + 2;
             }
 
             if (isOver(mouseX, mouseY, winX + winW - PAD - 232, bottomY, 70, 18) && selected != null) {

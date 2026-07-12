@@ -1,6 +1,7 @@
 package com.withouthonor.npcs.common.entity;
 
 import com.withouthonor.npcs.common.dialogue.DialogueRuntime;
+import com.withouthonor.npcs.common.entity.ai.MobGroup;
 import com.withouthonor.npcs.common.profile.CompanionProfile;
 import com.withouthonor.npcs.common.profile.PoseJson;
 import com.withouthonor.npcs.common.storage.CompanionIndex;
@@ -175,6 +176,15 @@ public class CompanionEntity extends PathfinderMob
     private int cfgShieldHoldTicks = 30;
     private int cfgShieldCooldownTicks = 40;
     private net.minecraft.world.entity.MobType cfgMobType = net.minecraft.world.entity.MobType.UNDEFINED;
+    // «Тип существа» для реакции чужих мобов (0.9.5 #4): читается WhCreatureAggroGoal. Ортогонален
+    // cfgMobType (тот — про урон зачарований).
+    private CreatureType cfgCreatureType = CreatureType.NEUTRAL;
+    // Кастом-тип: группы-атакующие из профиля (применяются только при cfgCreatureType == CUSTOM).
+    private java.util.Set<MobGroup> cfgCustomAttackers = java.util.Set.of();
+    // «Природная вражда» по типу между NPC (нежить бьёт жителя, житель боится нежить). Дефолт вкл.
+    private boolean cfgNaturalHostility = true;
+    // Учтён ли этот NPC в CreatureAggroState (релевантен для агра/защиты); для симметричного дек/инкремента.
+    private boolean aggroCounted;
     private boolean cfgFallDamage = true;
     private boolean cfgWebSlow = true;
     private boolean cfgCanDrown = true;
@@ -874,6 +884,16 @@ public class CompanionEntity extends PathfinderMob
                     this, net.minecraft.world.entity.LivingEntity.class, 10, true, false,
                     this::isHostileFactionTarget));
         }
+        // #4 Природная вражда: атакуем NPC вражеских типов (нежить→житель и т.п.). Только при боевом
+        // пресете (passive вышел выше), поверх фракций/агрессоров, не трогая агро против ваниль-мобов.
+        // Приоритет 5 — ниже явных агрессоров (2), фракций (3) И поиска цели для хила союзника (4):
+        // осознанные настройки и роль поддержки главнее природного типа. Детерминированно: у мага-
+        // поддержки вражда стартует, лишь когда некого лечить (support-finder не держит Flag.TARGET).
+        if (cfgNaturalHostility && !cfgCreatureType.npcEnemies().isEmpty()) {
+            this.targetSelector.addGoal(5, new net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal<>(
+                    this, net.minecraft.world.entity.LivingEntity.class, 10, true, false,
+                    this::isNaturalTypeEnemy));
+        }
 
         if (ef) {
             com.withouthonor.npcs.compat.epicfight.EpicFightCompat.installMobCombat(this);
@@ -889,6 +909,14 @@ public class CompanionEntity extends PathfinderMob
         // на каждом ударе (иначе MOVE освобождается и follow-цель разворачивает NPC к игроку — «челнок»).
         this.goalSelector.addGoal(2, new net.minecraft.world.entity.ai.goal.MeleeAttackGoal(
                 this, profile.getMeleeChaseSpeed(), true));
+    }
+
+    /** Природный враг по типу: другой NPC, чей тип входит в мой npcEnemies (нежить бьёт жителя).
+     *  Союзники по фракции исключены — их в одну фракцию собрали намеренно, тип это не переписывает. */
+    private boolean isNaturalTypeEnemy(net.minecraft.world.entity.LivingEntity target) {
+        return target instanceof CompanionEntity oc && oc != this
+                && cfgCreatureType.npcEnemies().contains(oc.getCreatureType())
+                && !isSameFaction(oc);
     }
 
     private boolean isHostileFactionTarget(net.minecraft.world.entity.LivingEntity target) {
@@ -1201,6 +1229,26 @@ public class CompanionEntity extends PathfinderMob
         }
     }
 
+    // Буфер Curios, снятый в die() ДО super.die(): иначе Curios API роняет их на LivingDropsEvent
+    // и чистит слоты, а снимок для Graveyard читал бы уже пустые. Живёт лишь на время смерти.
+    private net.minecraft.nbt.ListTag deathCuriosSnapshot;
+
+    /** Текущее содержимое Curios-слотов в NBT-виде секции "Curios" снапшота. */
+    private net.minecraft.nbt.ListTag curiosToTag() {
+        net.minecraft.nbt.ListTag curios = new net.minecraft.nbt.ListTag();
+        for (var e : com.withouthonor.npcs.compat.Compat.curios().getCurios(this)) {
+            if (e.stack().isEmpty()) {
+                continue;
+            }
+            CompoundTag c = new CompoundTag();
+            c.putString("slot", e.slotType());
+            c.putInt("idx", e.index());
+            c.put("item", e.stack().save(new CompoundTag()));
+            curios.add(c);
+        }
+        return curios;
+    }
+
     public CompoundTag saveEquipmentSnapshot() {
         CompoundTag tag = new CompoundTag();
         net.minecraft.nbt.ListTag functional = new net.minecraft.nbt.ListTag();
@@ -1216,17 +1264,8 @@ public class CompanionEntity extends PathfinderMob
         tag.putBoolean("HideOffhand", isHideOffhand());
         tag.put("Arrow", getArrowItem().save(new CompoundTag()));
         if (com.withouthonor.npcs.compat.Compat.curiosLoaded()) {
-            net.minecraft.nbt.ListTag curios = new net.minecraft.nbt.ListTag();
-            for (var e : com.withouthonor.npcs.compat.Compat.curios().getCurios(this)) {
-                if (e.stack().isEmpty()) {
-                    continue;
-                }
-                CompoundTag c = new CompoundTag();
-                c.putString("slot", e.slotType());
-                c.putInt("idx", e.index());
-                c.put("item", e.stack().save(new CompoundTag()));
-                curios.add(c);
-            }
+            // Во время смерти слоты уже очищены — берём буфер, снятый до super.die().
+            net.minecraft.nbt.ListTag curios = deathCuriosSnapshot != null ? deathCuriosSnapshot : curiosToTag();
             if (!curios.isEmpty()) {
                 tag.put("Curios", curios);
             }
@@ -1298,7 +1337,20 @@ public class CompanionEntity extends PathfinderMob
         }
         if (cfgAvoidSun) {
             this.goalSelector.addGoal(2, new net.minecraft.world.entity.ai.goal.RestrictSunGoal(this));
-            this.goalSelector.addGoal(5, new net.minecraft.world.entity.ai.goal.FleeSunGoal(this, 1.0D));
+            // Свой FleeSun без требования гореть — иначе ванильный сработал бы лишь при burn_in_sun.
+            this.goalSelector.addGoal(5, new com.withouthonor.npcs.common.entity.ai.AvoidSunGoal(this, 1.0D));
+        }
+        // #4 Природный страх: NPC-«жертва» (напр. житель) убегает от NPC своего хищного типа (нежить).
+        // Работает при любом стиле, даже пассивном (registerGoals зовётся до passive-выхода). Приоритет 1 —
+        // страх доминирует над боевыми MOVE-голами (жертва бежит, а не дерётся). Союзники по фракции — не враги.
+        if (cfgNaturalHostility && CreatureType.hasPredators(cfgCreatureType)) {
+            // Скан хищника троттлится ~раз в 10 тиков (как агро/защита), а не каждый кадр.
+            this.goalSelector.addGoal(1, new com.withouthonor.npcs.common.entity.ai.ThrottledAvoidEntityGoal<>(
+                    this, CompanionEntity.class, 8.0F, 1.0D, 1.3D,
+                    e -> e instanceof CompanionEntity oc
+                            && oc.getCreatureType().npcEnemies().contains(cfgCreatureType)
+                            && !isSameFaction(oc),
+                    10));
         }
         if (!"none".equals(cfgAutoFollowMode)) {
             this.goalSelector.addGoal(3,
@@ -1404,6 +1456,15 @@ public class CompanionEntity extends PathfinderMob
             case "illager" -> net.minecraft.world.entity.MobType.ILLAGER;
             default -> net.minecraft.world.entity.MobType.UNDEFINED;
         };
+        cfgCreatureType = CreatureType.byId(profile.getCreatureType());
+        cfgCustomAttackers = parseGroups(profile.getCreatureCustomAttackers());
+        cfgNaturalHostility = profile.isNaturalHostility();
+        if (!level().isClientSide) {
+            // Счётчик релевантных NPC для дешёвого гейта canUse (агра И защита).
+            boolean now = !effectiveAttackers().isEmpty() || !effectiveDefenders().isEmpty();
+            com.withouthonor.npcs.common.entity.ai.CreatureAggroState.update(aggroCounted, now);
+            aggroCounted = now;
+        }
         cfgFallDamage = profile.isFallDamage();
         cfgWebSlow = profile.isWebSlow();
         cfgCanDrown = profile.isCanDrown();
@@ -1497,6 +1558,67 @@ public class CompanionEntity extends PathfinderMob
         return cfgMobType;
     }
 
+    /** «Тип существа» для реакции чужих мобов (0.9.5 #4). */
+    public CreatureType getCreatureType() {
+        return cfgCreatureType;
+    }
+
+    /** Эффективные группы-атакующие: у кастома — из профиля, иначе — из пресета типа. */
+    public java.util.Set<MobGroup> effectiveAttackers() {
+        return cfgCreatureType == CreatureType.CUSTOM ? cfgCustomAttackers : cfgCreatureType.attackers();
+    }
+
+    /** Эффективные группы-защитники (пока только из пресета типа). */
+    public java.util.Set<MobGroup> effectiveDefenders() {
+        return cfgCreatureType.defenders();
+    }
+
+    private static java.util.Set<MobGroup> parseGroups(java.util.List<String> ids) {
+        if (ids.isEmpty()) {
+            return java.util.Set.of();
+        }
+        java.util.EnumSet<MobGroup> set = java.util.EnumSet.noneOf(MobGroup.class);
+        for (String id : ids) {
+            MobGroup g = MobGroup.byId(id);
+            if (g != null) {
+                set.add(g);
+            }
+        }
+        return set;
+    }
+
+    /**
+     * #4 Защитники реагируют на нападение на NPC-«жертву» (как ваниль-голем идёт на того, кто ударил
+     * жителя). Ваниль завязана на репутацию деревни, которой у нас нет, поэтому оповещаем сами из hurt():
+     * это ловит и ваншот (hurt зовётся до die). Нацеливаем ближних защитников на атакующего, если они
+     * сейчас без цели (не перебиваем их бой). Другой NPC / игрок в креативе-спектаторе — не цель.
+     */
+    private void alertDefenders(net.minecraft.world.entity.LivingEntity attacker) {
+        if (effectiveDefenders().isEmpty() || attacker instanceof CompanionEntity) {
+            return;
+        }
+        if (attacker instanceof net.minecraft.world.entity.player.Player p
+                && (p.isSpectator() || p.isCreative())) {
+            return;
+        }
+        net.minecraft.world.phys.AABB box = getBoundingBox().inflate(10.0D, 8.0D, 10.0D);
+        for (net.minecraft.world.entity.Mob defender : level().getEntitiesOfClass(
+                net.minecraft.world.entity.Mob.class, box, this::isDefender)) {
+            if (defender.getTarget() == null || !defender.getTarget().isAlive()) {
+                defender.setTarget(attacker);
+            }
+        }
+    }
+
+    private boolean isDefender(net.minecraft.world.entity.Mob m) {
+        for (MobGroup g : effectiveDefenders()) {
+            if (g.matches(m)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public boolean hurt(net.minecraft.world.damagesource.DamageSource source, float amount) {
         if (!level().isClientSide && amount > 0) {
@@ -1532,6 +1654,12 @@ public class CompanionEntity extends PathfinderMob
                 setPursuitTarget(attacker);
             }
         }
+        // Защитники (напр. големы у жителя) идут на атакующего — включая игрока. Независимо от провокации.
+        if (damaged && !level().isClientSide
+                && source.getEntity() instanceof net.minecraft.world.entity.LivingEntity att
+                && att != this) {
+            alertDefenders(att);
+        }
         return damaged;
     }
 
@@ -1562,8 +1690,7 @@ public class CompanionEntity extends PathfinderMob
         if (cfgProvokeIgnoreEscort) {
             Player escort = followedPlayer();
             if (escort != null && escort.getUUID().equals(player.getUUID())) {
-                setLastHurtByMob(null);
-                return true;
+                return suppressAggro();
             }
         }
         pruneProvokeState();
@@ -1582,7 +1709,15 @@ public class CompanionEntity extends PathfinderMob
             lastHurtByPlayerTick = tickCount; // этот игрок сейчас станет целью — стартуем окно прощения
             return false;
         }
-        setLastHurtByMob(null);
+        return suppressAggro();
+    }
+
+    /** Провокация подавляет агро; но у паникующего NPC lastHurtByMob НЕ снимаем — иначе PanicGoal
+     *  («убегать при ударе») не сработает. Агро всё равно подавлено (возвращаем true). */
+    private boolean suppressAggro() {
+        if (!cfgPanic) {
+            setLastHurtByMob(null);
+        }
         return true;
     }
 
@@ -2246,7 +2381,9 @@ public class CompanionEntity extends PathfinderMob
                 tickPotionUse();
             }
 
-            if (cfgBurnInSun && tickCount % 20 == 15) {
+            // Каждый тик, как ваниль-нежить: isSunBurnTick вероятностный (~4%/тик), при проверке раз
+            // в секунду NPC загорался бы в среднем через ~25 с — казалось, что не работает.
+            if (cfgBurnInSun) {
                 tickSunBurn();
             }
 
@@ -2908,6 +3045,13 @@ public class CompanionEntity extends PathfinderMob
         // таймер в tick() не должен потом снова войти в staged-блок и повторно позвать die().
         deathStaged = false;
         deathStageFinished = true;
+        // Curios: снять в буфер и очистить слоты ДО super.die(). Curios API на LivingDropsEvent
+        // (внутри super.die) увидит пустые слоты и ничего не уронит; Graveyard возьмёт из буфера —
+        // при респавне снаряжение вернётся, симметрично setDropChance=0 у обычной экипировки.
+        if (!level().isClientSide && com.withouthonor.npcs.compat.Compat.curiosLoaded()) {
+            deathCuriosSnapshot = curiosToTag();
+            com.withouthonor.npcs.compat.Compat.curios().resetCurios(this);
+        }
         super.die(source); // при повторном вызове ваниль сама no-op (this.dead)
         if (level().isClientSide) {
             return;
@@ -2971,6 +3115,10 @@ public class CompanionEntity extends PathfinderMob
     @Override
     public void remove(RemovalReason reason) {
         if (!level().isClientSide) {
+            if (aggroCounted) {
+                com.withouthonor.npcs.common.entity.ai.CreatureAggroState.update(true, false);
+                aggroCounted = false;
+            }
             if (bossBar != null) {
                 bossBar.removeAllPlayers();
                 bossBar = null;

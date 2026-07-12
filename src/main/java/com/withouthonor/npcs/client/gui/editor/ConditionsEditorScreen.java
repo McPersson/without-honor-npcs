@@ -1104,22 +1104,32 @@ public class ConditionsEditorScreen extends ScaledScreen {
             boolean infoHover = isOver(mouseX, mouseY, x + colW - 22, y + 4, 16, 16);
             boolean hovered = !infoHover && isOver(mouseX, mouseY, x, y, colW, 24);
             VanillaUIHelper.drawButton(g, x, y, colW, 24, hovered);
-            g.drawString(font, font.plainSubstrByWidth(
-                    Component.translatable(type.label()).getString(), colW - 30), x + 6, y + 4,
+            String label = Component.translatable(type.label()).getString();
+            String desc = Component.translatable(type.description()).getString();
+            g.drawString(font, ellipsize(label, colW - 30), x + 6, y + 4,
                     hovered ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE, false);
-            g.drawString(font, font.plainSubstrByWidth(
-                            Component.translatable(type.description()).getString(), colW - 30), x + 6, y + 14,
+            g.drawString(font, ellipsize(desc, colW - 30), x + 6, y + 14,
                     VanillaUIHelper.TEXT_DARK_GRAY, false);
             g.drawCenteredString(font, "?", x + colW - 14, y + 8,
                     infoHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
             if (infoHover) {
                 hoveredDetail = Component.translatable(type.detail()).getString();
+            } else if (hovered && (font.width(desc) > colW - 30 || font.width(label) > colW - 30)) {
+                hoveredDetail = label + "\n§7" + desc;
             }
         }
         if (hoveredDetail != null) {
             multilineTooltip(g, hoveredDetail, mouseX, mouseY);
         }
         g.pose().popPose();
+    }
+
+    /** Обрезка по ширине с «…» на конце, если не влезает (для длинных переводов). */
+    private String ellipsize(String s, int maxW) {
+        if (font.width(s) <= maxW) {
+            return s;
+        }
+        return font.plainSubstrByWidth(s, maxW - font.width("…")) + "…";
     }
 
     private void multilineTooltip(GuiGraphics g, String text, int x, int y) {

@@ -26,7 +26,9 @@ import net.minecraftforge.registries.RegistryObject;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Predicate;
 
 /**
@@ -125,23 +127,18 @@ public final class IronsSpellsBridgeImpl implements IronsSpellsBridge {
                 bucket.add(spell);
             }
         }
-        // Imbued-заклинания с держимого оружия (ISpellContainer) — в пул атаки, всегда вес 1
-        // (contains-дедуп ниже корректен и при дубликатах от веса). Уровень слота ISS
-        // игнорируется: как и у лоадаута, уровень берётся из «Силы» (setSpellQuality).
-        if (profile.isMagicSpellsFromWeapon()) {
-            for (AbstractSpell spell : readContainerSpells(npc.getMainHandItem())) {
-                if (!attack.contains(spell)) {
-                    attack.add(spell);
-                }
-            }
-        }
-        // Спеллбук в Curios-слоте "spellbook" активен ВСЕГДА, без галочки: книга в слоте и есть
-        // «включатель» (вынул — спеллы пропали). Все книжные спеллы идут в пул АТАКИ с весом 1:
-        // категории/веса — прерогатива ручного лоадаута. Учитываем ДО проверки «лоадаут пуст»,
-        // чтобы маг с одной лишь книгой кастовал.
-        for (AbstractSpell spell : readEquippedSpellbookSpells(npc)) {
-            if (!attack.contains(spell)) {
-                attack.add(spell);
+        // Книжные/imbued спеллы: категория/вес берутся из book_overrides по id спелла (дефолт —
+        // атака, вес 1), ручной лоадаут главнее. Спеллбук в Curios активен всегда (книга = включатель),
+        // оружие — по галочке. Учитываем ДО проверки «лоадаут пуст», чтобы маг с одной книгой кастовал.
+        for (BookSpell bs : resolveExtraSpells(npc, profile)) {
+            List<AbstractSpell> bucket = switch (bs.category()) {
+                case "defense" -> defense;
+                case "movement" -> movement;
+                case "support", "support_heal", "support_buff" -> support;
+                default -> attack;
+            };
+            for (int w = Math.max(1, bs.weight()); w > 0; w--) {
+                bucket.add(bs.spell());
             }
         }
         if (attack.isEmpty() && defense.isEmpty() && movement.isEmpty() && support.isEmpty()) {
@@ -191,6 +188,21 @@ public final class IronsSpellsBridgeImpl implements IronsSpellsBridge {
                 }
             }
         }
+        // Книжные/imbued спеллы с support-оверрайдом тоже идут в поддержку союзников (раньше книжная
+        // поддержка терялась целиком). Категория/вес — из book_overrides по id.
+        for (BookSpell bs : resolveExtraSpells(npc, profile)) {
+            List<AbstractSpell> bucket = switch (bs.category()) {
+                case "support_buff" -> buffs;
+                case "support_heal", "support" -> healing;
+                default -> null;
+            };
+            if (bucket == null) {
+                continue;
+            }
+            for (int w = Math.max(1, bs.weight()); w > 0; w--) {
+                bucket.add(bs.spell());
+            }
+        }
         if (healing.isEmpty() && buffs.isEmpty()) {
             return null; // нет support-спеллов — цель поддержки не нужна
         }
@@ -201,6 +213,44 @@ public final class IronsSpellsBridgeImpl implements IronsSpellsBridge {
         goal.setSpells(healing, buffs);
         goal.setSpellQuality(profile.getMagicMinQuality(), profile.getMagicMaxQuality());
         return goal;
+    }
+
+    /** Книжный/imbued спелл с назначенными категорией и весом (из book_overrides либо дефолт). */
+    private record BookSpell(AbstractSpell spell, String category, int weight) {
+    }
+
+    /**
+     * Спеллы из спеллбука в Curios и (по галочке) с imbued-оружия, с применёнными оверрайдами
+     * категории/веса по id. id, уже стоящие в ручном лоадауте, пропускаются (ручной главнее);
+     * источники дедупятся между собой по id. Ключ оверрайда == getSpellId() == resource.toString().
+     */
+    private List<BookSpell> resolveExtraSpells(CompanionEntity npc, CompanionProfile profile) {
+        List<AbstractSpell> raw = new ArrayList<>();
+        if (profile.isMagicSpellsFromWeapon()) {
+            raw.addAll(readContainerSpells(npc.getMainHandItem()));
+        }
+        raw.addAll(readEquippedSpellbookSpells(npc));
+        if (raw.isEmpty()) {
+            return List.of();
+        }
+        Set<String> manual = new HashSet<>();
+        for (CompanionProfile.MagicSpell ms : profile.getMagicSpells()) {
+            manual.add(ms.id());
+        }
+        List<BookSpell> out = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (AbstractSpell spell : raw) {
+            if (spell == null || spell == SpellRegistry.none()) {
+                continue;
+            }
+            String id = spell.getSpellId();
+            if (manual.contains(id) || !seen.add(id)) {
+                continue; // ручной лоадаут главнее; дубли между книгой/оружием отсекаем
+            }
+            CompanionProfile.MagicSpell ov = profile.bookOverride(id);
+            out.add(new BookSpell(spell, ov != null ? ov.category() : "attack", ov != null ? ov.weight() : 1));
+        }
+        return out;
     }
 
     @Override

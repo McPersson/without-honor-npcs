@@ -50,6 +50,37 @@ public class PotionBeltScreen extends ScaledScreen {
 
     private int winX, winY, winW, winH;
     private int sectionsTop, invY, bottomY;
+
+    /**
+     * Правое выравнивание кластера ряда: [?][☑ an][☑ im Kampf/der Reihe nach]. Возвращает x кнопок
+     * {?, «вкл», комбо}. Комбо-метка прижата к правому краю секции — адаптивно под длину перевода (DE/CJK).
+     */
+    private String ellipsize(String s, int maxW) {
+        if (font.width(s) <= maxW) {
+            return s;
+        }
+        if (maxW <= 0) {
+            return "";
+        }
+        return font.plainSubstrByWidth(s, Math.max(0, maxW - font.width("…"))) + "…";
+    }
+
+    /**
+     * Колонки правого кластера [?][☑ an][☑ im Kampf/der Reihe nach] — ОДИНАКОВЫЕ для всех рядов
+     * (чекбоксы не прыгают по X между строками). Комбо-колонка отступает от правого края на самую
+     * длинную из меток («im Kampf»/«der Reihe nach»), так что и она влезает, и колонки выровнены.
+     */
+    private int[] clusterX() {
+        int right = winX + winW - PAD - 4;
+        int comboW = Math.max(
+                font.width(Component.translatable("wh_npcs.ui.potion_belt.in_combat").getString()),
+                font.width(Component.translatable("wh_npcs.ui.potion_belt.cycle").getString()));
+        int comboX = right - comboW - 15;
+        int onW = font.width(Component.translatable("wh_npcs.ui.potion_belt.on").getString());
+        int enX = comboX - 16 - onW - 15;
+        int qX = enX - 10 - 11;
+        return new int[]{qX, enX, comboX};
+    }
     private ItemStack hoverTip = ItemStack.EMPTY;
     @Nullable
     private String hoverCatTip;
@@ -138,45 +169,38 @@ public class PotionBeltScreen extends ScaledScreen {
             int secY = sectionsTop + c * SEC_H;
 
             g.fill(winX + PAD, secY - 3, winX + winW - PAD, secY + SEC_H - 8, CAT_BG[c]);
-            g.drawString(font, Component.translatable(CAT_LABEL_KEYS[c]).getString(), winX + PAD + 4, secY,
-                    enabled[c] ? CAT_COLOR[c] : VanillaUIHelper.TEXT_DARK_GRAY, false);
 
-            int qX = winX + winW - PAD - 118;
-            boolean qHover = isOver(mouseX, mouseY, qX, secY - 1, 11, 11);
-            VanillaUIHelper.drawButton(g, qX, secY - 1, 11, 11, qHover);
-            g.drawCenteredString(font, "?", qX + 5, secY + 1,
+            int[] cx = clusterX();
+            int qX = cx[0], enX = cx[1], comboX = cx[2];
+            // Правый кластер — по вертикальному центру цветовой полосы (secY-3 .. secY+SEC_H-8), не у верха.
+            int cy = secY - 3 + (SEC_H - 5 - 12) / 2; // центр 12px-чекбокса в полосе высотой SEC_H-5
+            // Подпись категории не заезжает на правый кластер — режем «…» до qX.
+            g.drawString(font, ellipsize(Component.translatable(CAT_LABEL_KEYS[c]).getString(),
+                            qX - (winX + PAD + 4) - 6), winX + PAD + 4, secY,
+                    enabled[c] ? CAT_COLOR[c] : VanillaUIHelper.TEXT_DARK_GRAY, false);
+            boolean qHover = isOver(mouseX, mouseY, qX, cy, 11, 11);
+            VanillaUIHelper.drawButton(g, qX, cy, 11, 11, qHover);
+            g.drawCenteredString(font, "?", qX + 5, cy + 2,
                     qHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
             if (qHover) {
                 hoverCatTip = Component.translatable(CAT_TIP_KEYS[c]).getString();
             }
 
-            int enX = winX + winW - PAD - 101;
-            boolean enHover = isOver(mouseX, mouseY, enX, secY - 1, 12, 12);
-            VanillaUIHelper.drawButton(g, enX, secY - 1, 12, 12, enHover);
+            boolean enHover = isOver(mouseX, mouseY, enX, cy, 12, 12);
+            VanillaUIHelper.drawButton(g, enX, cy, 12, 12, enHover);
             if (enabled[c]) {
-                VanillaUIHelper.drawCheck(g, enX + 1, secY + 1, VanillaUIHelper.TEXT_GREEN);
+                VanillaUIHelper.drawCheck(g, enX + 1, cy + 2, VanillaUIHelper.TEXT_GREEN);
             }
-            g.drawString(font, Component.translatable("wh_npcs.ui.potion_belt.on").getString(), enX + 15, secY + 1, VanillaUIHelper.TEXT_GRAY, false);
+            g.drawString(font, Component.translatable("wh_npcs.ui.potion_belt.on").getString(), enX + 15, cy + 2, VanillaUIHelper.TEXT_GRAY, false);
 
-            if (c == 0) {
-                int cbX = winX + winW - PAD - 64;
-                boolean cbHover = isOver(mouseX, mouseY, cbX, secY - 1, 12, 12);
-                VanillaUIHelper.drawButton(g, cbX, secY - 1, 12, 12, cbHover);
-                if (selfCombat) {
-                    VanillaUIHelper.drawCheck(g, cbX + 1, secY + 1, VanillaUIHelper.TEXT_GREEN);
-                }
-                g.drawString(font, Component.translatable("wh_npcs.ui.potion_belt.in_combat").getString(), cbX + 15, secY + 1, VanillaUIHelper.TEXT_GRAY, false);
+            boolean comboHover = isOver(mouseX, mouseY, comboX, cy, 12, 12);
+            VanillaUIHelper.drawButton(g, comboX, cy, 12, 12, comboHover);
+            if (c == 0 ? selfCombat : seq[c]) {
+                VanillaUIHelper.drawCheck(g, comboX + 1, cy + 2, VanillaUIHelper.TEXT_GREEN);
             }
-
-            if (c != 0) {
-                int sqX = winX + winW - PAD - 64;
-                boolean sqHover = isOver(mouseX, mouseY, sqX, secY - 1, 12, 12);
-                VanillaUIHelper.drawButton(g, sqX, secY - 1, 12, 12, sqHover);
-                if (seq[c]) {
-                    VanillaUIHelper.drawCheck(g, sqX + 1, secY + 1, VanillaUIHelper.TEXT_GREEN);
-                }
-                g.drawString(font, Component.translatable("wh_npcs.ui.potion_belt.cycle").getString(), sqX + 15, secY + 1, VanillaUIHelper.TEXT_GRAY, false);
-            }
+            g.drawString(font, Component.translatable(c == 0 ? "wh_npcs.ui.potion_belt.in_combat"
+                            : "wh_npcs.ui.potion_belt.cycle").getString(),
+                    comboX + 15, cy + 2, VanillaUIHelper.TEXT_GRAY, false);
 
             for (int i = 0; i < SLOTS; i++) {
                 int x = slotX(i);
@@ -254,20 +278,20 @@ public class PotionBeltScreen extends ScaledScreen {
         for (int c = 0; c < 3; c++) {
             int secY = sectionsTop + c * SEC_H;
 
-            if (button == 0 && isOver(mouseX, mouseY, winX + winW - PAD - 101, secY - 1, 12, 12)) {
+            int[] cx = clusterX();
+            int cy = secY - 3 + (SEC_H - 5 - 12) / 2;
+            if (button == 0 && isOver(mouseX, mouseY, cx[1], cy, 12, 12)) {
                 enabled[c] = !enabled[c];
                 writeBack();
                 return true;
             }
 
-            if (c == 0 && button == 0 && isOver(mouseX, mouseY, winX + winW - PAD - 64, secY - 1, 12, 12)) {
-                selfCombat = !selfCombat;
-                writeBack();
-                return true;
-            }
-
-            if (c != 0 && button == 0 && isOver(mouseX, mouseY, winX + winW - PAD - 64, secY - 1, 12, 12)) {
-                seq[c] = !seq[c];
+            if (button == 0 && isOver(mouseX, mouseY, cx[2], cy, 12, 12)) {
+                if (c == 0) {
+                    selfCombat = !selfCombat;
+                } else {
+                    seq[c] = !seq[c];
+                }
                 writeBack();
                 return true;
             }

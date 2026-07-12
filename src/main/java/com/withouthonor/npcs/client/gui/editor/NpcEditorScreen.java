@@ -1156,32 +1156,25 @@ public class NpcEditorScreen extends ScaledScreen {
         g.drawString(font, tr("wh_npcs.ui.npc.combat_sec_behavior"), fx, contentY + 86, VanillaUIHelper.TEXT_GRAY, false);
         VanillaUIHelper.drawSeparator(g, fx, contentY + 96, 206);
 
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_style"), fx, contentY + 107, VanillaUIHelper.TEXT_GRAY, false);
+        // «Тип существа» → подменю: реакция мобов (creature_type) + урон от зачарований (mob_type).
+        boolean typeHover = isOver(mouseX, mouseY, fx, contentY + 102, 210, 18);
+        VanillaUIHelper.drawButton(g, fx, contentY + 102, 210, 18, typeHover);
+        g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_creature_type"), fx + 105, contentY + 107,
+                typeHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
+        if (typeHover) {
+            tooltip = tr("wh_npcs.ui.npc.creature_type_tip");
+        }
+
+        g.drawString(font, tr("wh_npcs.ui.npc.combat_style"), fx, contentY + 129, VanillaUIHelper.TEXT_GRAY, false);
         String preset = profileJson.has("combat_preset")
                 ? profileJson.get("combat_preset").getAsString() : "passive";
         int presetIdx = presetIndex(preset);
-        boolean presetHover = isOver(mouseX, mouseY, fx + 52, contentY + 102, 158, 18);
-        VanillaUIHelper.drawButton(g, fx + 52, contentY + 102, 158, 18, presetHover);
-        g.drawCenteredString(font, tr(PRESET_NAME_KEYS[presetIdx]) + " ▾", fx + 131, contentY + 107,
+        boolean presetHover = isOver(mouseX, mouseY, fx + 52, contentY + 124, 158, 18);
+        VanillaUIHelper.drawButton(g, fx + 52, contentY + 124, 158, 18, presetHover);
+        g.drawCenteredString(font, tr(PRESET_NAME_KEYS[presetIdx]) + " ▾", fx + 131, contentY + 129,
                 presetHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
         if (presetHover) {
             tooltip = tr("wh_npcs.ui.npc.combat_style_tip");
-        }
-
-        String mt = str("mob_type", "undefined");
-        int mtIdx = 0;
-        for (int i = 0; i < MOBTYPE_IDS.length; i++) {
-            if (MOBTYPE_IDS[i].equals(mt)) {
-                mtIdx = i;
-            }
-        }
-        g.drawString(font, tr("wh_npcs.ui.npc.combat_type"), fx, contentY + 129, VanillaUIHelper.TEXT_GRAY, false);
-        boolean mtHover = isOver(mouseX, mouseY, fx + 52, contentY + 124, 158, 18);
-        VanillaUIHelper.drawButton(g, fx + 52, contentY + 124, 158, 18, mtHover);
-        g.drawCenteredString(font, tr(MOBTYPE_NAME_KEYS[mtIdx]) + " ▾", fx + 131, contentY + 129,
-                mtHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
-        if (mtHover) {
-            tooltip = tr("wh_npcs.ui.npc.combat_type_tip");
         }
 
         int chkY = contentY + 148;
@@ -1445,25 +1438,15 @@ public class NpcEditorScreen extends ScaledScreen {
         int rx = combatRightX();
         boolean ef = com.withouthonor.npcs.compat.Compat.epicFightLoaded();
 
-        if (isOver(mouseX, mouseY, fx + 52, contentY + 102, 158, 18)) {
+        if (isOver(mouseX, mouseY, fx, contentY + 102, 210, 18)) {
             if (minecraft != null) {
-                minecraft.setScreen(new CombatPresetScreen(this, profileJson));
+                minecraft.setScreen(new CreatureTypeScreen(this, profileJson));
             }
             return true;
         }
         if (isOver(mouseX, mouseY, fx + 52, contentY + 124, 158, 18)) {
-            String mt = str("mob_type", "undefined");
-            int idx = 0;
-            for (int i = 0; i < MOBTYPE_IDS.length; i++) {
-                if (MOBTYPE_IDS[i].equals(mt)) {
-                    idx = i;
-                }
-            }
-            String next = MOBTYPE_IDS[(idx + 1) % MOBTYPE_IDS.length];
-            if ("undefined".equals(next)) {
-                profileJson.remove("mob_type");
-            } else {
-                profileJson.addProperty("mob_type", next);
+            if (minecraft != null) {
+                minecraft.setScreen(new CombatPresetScreen(this, profileJson));
             }
             return true;
         }
@@ -1654,8 +1637,8 @@ public class NpcEditorScreen extends ScaledScreen {
                 }
             }
         }
-        g.drawString(font, tr("wh_npcs.ui.npc.drops_hint"),
-                contentX + 8, dropSlotY() + 30, VanillaUIHelper.TEXT_WHITE, false);
+        g.drawWordWrap(font, Component.translatable("wh_npcs.ui.npc.drops_hint"),
+                contentX + 8, dropSlotY() + 30, contentW - 16, VanillaUIHelper.TEXT_WHITE);
         return tooltip;
     }
 
@@ -2585,13 +2568,17 @@ public class NpcEditorScreen extends ScaledScreen {
         if (vt != null) {
             pendingTip = vt;
         }
-        g.drawString(font, tr("wh_npcs.ui.npc.equip_rmb_note"),
-                invGridX(), ty + 60, VanillaUIHelper.TEXT_WHITE, false);
+        g.drawWordWrap(font, Component.translatable("wh_npcs.ui.npc.equip_rmb_note"),
+                invGridX(), ty + 60, contentX + contentW - 8 - invGridX(), VanillaUIHelper.TEXT_WHITE);
 
         boolean curLoaded = com.withouthonor.npcs.compat.Compat.curiosLoaded();
-        boolean curHover = isOver(mouseX, mouseY, invGridX() + 104, ty, 100, 18);
-        VanillaUIHelper.drawButton(g, invGridX() + 104, ty, 100, 18, curHover && curLoaded);
-        g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_accessories"), invGridX() + 154, ty + 5,
+        // Кнопка «Аксессуары» — справа от сетки инвентаря (9 колонок по 18px), по верхней строке, с зазором,
+        // чтобы не слипалась с клетками и не налезала на метки видимости слева (DE/CJK).
+        int curX = invGridX() + 9 * 18 + 10;
+        int curY = invGridY();
+        boolean curHover = isOver(mouseX, mouseY, curX, curY, 100, 18);
+        VanillaUIHelper.drawButton(g, curX, curY, 100, 18, curHover && curLoaded);
+        g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_accessories"), curX + 50, curY + 5,
                 !curLoaded ? VanillaUIHelper.TEXT_DARK_GRAY
                         : (curHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA));
         if (curHover) {
@@ -2646,7 +2633,7 @@ public class NpcEditorScreen extends ScaledScreen {
         }
 
         if (button == 0 && com.withouthonor.npcs.compat.Compat.curiosLoaded()
-                && isOver(mouseX, mouseY, invGridX() + 104, invGridY() + 78, 100, 18)) {
+                && isOver(mouseX, mouseY, invGridX() + 9 * 18 + 10, invGridY(), 100, 18)) {
             if (minecraft != null) {
                 minecraft.setScreen(new CuriosEditorScreen(this, npc.getId()));
             }
@@ -2858,8 +2845,10 @@ public class NpcEditorScreen extends ScaledScreen {
             }
 
             VanillaUIHelper.drawSeparator(g, fx, contentY + 78, right - fx);
-            g.drawString(font, tr("wh_npcs.ui.npc.fac_tiers"), fx, contentY + 84, VanillaUIHelper.TEXT_GRAY, false);
-            g.drawString(font, tr("wh_npcs.ui.npc.fac_tiers_sub"), fx + 34, contentY + 84,
+            String facTiers = tr("wh_npcs.ui.npc.fac_tiers");
+            g.drawString(font, facTiers, fx, contentY + 84, VanillaUIHelper.TEXT_GRAY, false);
+            // Подзаголовок сразу за шириной заголовка — иначе на длинных переводах («Stufen») слипается.
+            g.drawString(font, tr("wh_npcs.ui.npc.fac_tiers_sub"), fx + font.width(facTiers) + 6, contentY + 84,
                     VanillaUIHelper.TEXT_DARK_GRAY, false);
             g.drawString(font, tr("wh_npcs.ui.npc.fac_col_name"), fx + 20, contentY + 100, VanillaUIHelper.TEXT_DARK_GRAY, false);
             g.drawCenteredString(font, tr("wh_npcs.ui.npc.fac_col_threshold"), fx + 155, contentY + 100, VanillaUIHelper.TEXT_DARK_GRAY);
