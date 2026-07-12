@@ -31,7 +31,9 @@ public class CuriosEditorScreen extends ScaledScreen {
             Map.entry("bracelet", "wh_npcs.ui.curios.slot.bracelet"), Map.entry("hands", "wh_npcs.ui.curios.slot.hands"),
             Map.entry("ring", "wh_npcs.ui.curios.slot.ring"), Map.entry("belt", "wh_npcs.ui.curios.slot.belt"),
             Map.entry("charm", "wh_npcs.ui.curios.slot.charm"), Map.entry("curio", "wh_npcs.ui.curios.slot.curio"),
-            Map.entry("feet", "wh_npcs.ui.curios.slot.feet"));
+            Map.entry("feet", "wh_npcs.ui.curios.slot.feet"),
+            // Слот Iron's Spells (регистрируется через Curios) — иначе показывался сырой id
+            Map.entry("spellbook", "wh_npcs.ui.curios.slot.spellbook"));
 
     private final Screen parent;
     private final int npcEntityId;

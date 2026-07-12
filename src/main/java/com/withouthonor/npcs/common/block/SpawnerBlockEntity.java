@@ -215,6 +215,9 @@ public class SpawnerBlockEntity extends BlockEntity {
             npc.setCustomName(Component.literal(json.has("name") ? json.get("name").getAsString() : "NPC"));
             com.withouthonor.npcs.network.ProfileSharePackets.applyEquipment(json, npc);
             level.addFreshEntity(npc);
+            // Профиль пресета применился в EntityJoinLevel, но HP осталось дефолтным (20) —
+            // при свежем спавне добиваем до max профиля.
+            npc.setHealth(npc.getMaxHealth());
             spawned.add(npc.getUUID());
             return true;
         } catch (Exception e) {

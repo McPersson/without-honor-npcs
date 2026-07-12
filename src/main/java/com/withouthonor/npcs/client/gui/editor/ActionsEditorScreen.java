@@ -83,7 +83,11 @@ public class ActionsEditorScreen extends ScaledScreen {
             new TypeInfo("edit_profile", "wh_npcs.ui.act.type.edit_profile.label",
                     "wh_npcs.ui.act.type.edit_profile.desc", "wh_npcs.ui.act.type.edit_profile.detail"),
             new TypeInfo("combat_stats", "wh_npcs.ui.act.type.combat_stats.label",
-                    "wh_npcs.ui.act.type.combat_stats.desc", "wh_npcs.ui.act.type.combat_stats.detail"));
+                    "wh_npcs.ui.act.type.combat_stats.desc", "wh_npcs.ui.act.type.combat_stats.detail"),
+            new TypeInfo("cast_spell", "wh_npcs.ui.act.type.cast_spell.label",
+                    "wh_npcs.ui.act.type.cast_spell.desc", "wh_npcs.ui.act.type.cast_spell.detail"),
+            new TypeInfo("wait", "wh_npcs.ui.act.type.wait.label",
+                    "wh_npcs.ui.act.type.wait.desc", "wh_npcs.ui.act.type.wait.detail"));
 
     private final Screen parent;
     private final List<DialogueAction> actions;
@@ -167,8 +171,20 @@ public class ActionsEditorScreen extends ScaledScreen {
     @Nullable
     private String epFactionTip;
 
+    // «Ждать» — пауза перед следующими действиями
+    private float waitSeconds = 1.0F;
+    @Nullable
+    private EditBox waitBox;
+
+    // «Кастовать заклинание» — сценарный каст Iron's Spells
+    private String castSpellId = "";
+    private int castLevel = 1;
+    private boolean castTargetSelf;
+    @Nullable
+    private String castSpellName; // кэш локализованного имени выбранного спелла для показа
+
     // «Боевые параметры» — пустое поле/галочка = не менять
-    private static final String[] CS_PRESET_IDS = {"", "passive", "melee", "shield", "bow", "potion"};
+    private static final String[] CS_PRESET_IDS = {"", "passive", "melee", "shield", "bow", "potion", "mage"};
     private static final String[] CS_TARGET_IDS =
             {"players", "monsters", "animals", "villagers", "npcs", "factions"};
     private String csPreset = "";
@@ -197,6 +213,7 @@ public class ActionsEditorScreen extends ScaledScreen {
         super(Component.translatable("wh_npcs.ui.actions.window_title"));
         this.parent = parent;
         this.actions = actions;
+        SPELL_NAME_CACHE.clear(); // кэш живёт от открытия экрана — на случай смены языка/датапаков
     }
 
     public static void open(Screen parent, DialogueChoice choice) {
@@ -521,6 +538,22 @@ public class ActionsEditorScreen extends ScaledScreen {
                 scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(csArmorBox, 0, 30, 1, 0.2F,
                         "", true, () -> setFocused(null)));
             }
+            case "wait" -> {
+                waitBox = addRenderableWidget(new SelectableEditBox(font, rightX + 76, edY() + 20, 50, 16,
+                        Component.translatable("wh_npcs.ui.actions.wait_label")));
+                waitBox.setMaxLength(6);
+                waitBox.setValue(com.withouthonor.npcs.client.gui.NumberScrub.fmt(waitSeconds, false));
+                waitBox.setResponder(v -> {
+                    try {
+                        waitSeconds = Math.max(0.05F, Math.min(600.0F,
+                                Float.parseFloat(v.trim().replace(',', '.'))));
+                        writeBack();
+                    } catch (NumberFormatException ignored) {
+                    }
+                });
+                scrubs.add(new com.withouthonor.npcs.client.gui.NumberScrub(waitBox, 0.05F, 600.0F, 0.5F, 0.5F,
+                        "1", false, () -> setFocused(null)));
+            }
             default -> {
             }
         }
@@ -600,6 +633,20 @@ public class ActionsEditorScreen extends ScaledScreen {
         csTargetsEnabled = false;
         java.util.Arrays.fill(csTargets, false);
         csHeal = false;
+        waitSeconds = 1.0F;
+        if (action instanceof Actions.Wait w) {
+            waitSeconds = w.seconds();
+        }
+        castSpellId = "";
+        castLevel = 1;
+        castTargetSelf = false;
+        castSpellName = null;
+        if (action instanceof Actions.CastSpell cast) {
+            castSpellId = cast.spellId();
+            castLevel = cast.level();
+            castTargetSelf = cast.targetSelf();
+            castSpellName = lookupSpellName(castSpellId);
+        }
         if (action instanceof Actions.Transform tr) {
             transformFile = tr.file();
             transformEquipment = tr.equipment();
@@ -770,6 +817,10 @@ public class ActionsEditorScreen extends ScaledScreen {
                             parseOptFloat(csHpBox), parseOptFloat(csDamageBox),
                             parseOptFloat(csArmorBox), csHeal));
                 }
+                case "cast_spell" -> actions.set(selected,
+                        new Actions.CastSpell(castSpellId, Math.max(1, castLevel), castTargetSelf));
+                case "wait" -> actions.set(selected, new Actions.Wait(
+                        Math.max(0.05F, Math.min(600.0F, waitSeconds))));
                 default -> {
                 }
             }
@@ -844,6 +895,8 @@ public class ActionsEditorScreen extends ScaledScreen {
             case "attack_player" -> new Actions.AttackPlayer(false, 16, false);
             case "edit_profile" -> new Actions.EditProfile("", "", "", "");
             case "combat_stats" -> new Actions.CombatStats("", "", null, null, null, false);
+            case "cast_spell" -> new Actions.CastSpell("", 1, false);
+            case "wait" -> new Actions.Wait(1.0F);
             case "run_command" -> new Actions.RunCommand(
                     Component.translatable("wh_npcs.ui.actions.command_hint").getString());
             case "sound" -> new Actions.Sound(
@@ -1037,7 +1090,51 @@ public class ActionsEditorScreen extends ScaledScreen {
                     ? Component.translatable("wh_npcs.ui.actions.sum_f_none").getString()
                     : String.join(", ", parts)).getString();
         }
+        if (action instanceof Actions.Wait w) {
+            return Component.translatable("wh_npcs.ui.actions.sum_wait",
+                    com.withouthonor.npcs.client.gui.NumberScrub.fmt(w.seconds(), false)).getString();
+        }
+        if (action instanceof Actions.CastSpell cast) {
+            String name = cast.spellId().isBlank()
+                    ? Component.translatable("wh_npcs.ui.actions.sum_f_none").getString()
+                    : shortSpellName(cast.spellId());
+            return Component.translatable(cast.targetSelf()
+                            ? "wh_npcs.ui.actions.sum_cast_self"
+                            : "wh_npcs.ui.actions.sum_cast_player", name).getString();
+        }
         return action.type();
+    }
+
+    /**
+     * Кэш id→локализованное имя спелла: мост строит список заново (весь реестр + перевод +
+     * сортировка) на каждый вызов, а summary() зовётся каждый кадр. Сбрасывается в конструкторе.
+     */
+    private static final java.util.Map<String, String> SPELL_NAME_CACHE = new java.util.HashMap<>();
+
+    /** Локализованное имя спелла по id ("irons_spellbooks:fireball") через мост, либо сам id. */
+    @Nullable
+    private static String lookupSpellName(String spellId) {
+        if (spellId == null || spellId.isBlank() || !com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()) {
+            return null;
+        }
+        // Наполняем кэш один раз; дальше промах (спелл не найден) отдаёт null без обхода реестра.
+        if (SPELL_NAME_CACHE.isEmpty()) {
+            for (com.withouthonor.npcs.compat.SpellInfo s
+                    : com.withouthonor.npcs.compat.Compat.ironsSpells().listSpells()) {
+                SPELL_NAME_CACHE.put(s.id(), s.name());
+            }
+        }
+        return SPELL_NAME_CACHE.get(spellId);
+    }
+
+    /** Короткое имя для сводки: локализованное, иначе часть id после ':'. */
+    private static String shortSpellName(String spellId) {
+        String name = lookupSpellName(spellId);
+        if (name != null) {
+            return name;
+        }
+        int colon = spellId.indexOf(':');
+        return colon >= 0 ? spellId.substring(colon + 1) : spellId;
     }
 
     private void renderEditor(GuiGraphics g, int mouseX, int mouseY) {
@@ -1478,6 +1575,51 @@ public class ActionsEditorScreen extends ScaledScreen {
                 g.drawString(font, Component.translatable("wh_npcs.ui.actions.cs_note").getString(),
                         rightX, edY() + 132, VanillaUIHelper.TEXT_WHITE, false);
             }
+            case "wait" -> {
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.wait_label").getString(),
+                        rightX, edY() + 24, VanillaUIHelper.TEXT_GRAY, false);
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.wait_note").getString(),
+                        rightX, edY() + 48, VanillaUIHelper.TEXT_DARK_GRAY, false);
+            }
+            case "cast_spell" -> {
+                drawSmall(g, Component.translatable("wh_npcs.ui.actions.cast_pick").getString(),
+                        rightX, edY() + 2, 160, mouseX, mouseY, VanillaUIHelper.TEXT_AQUA);
+                String name = castSpellId.isBlank()
+                        ? Component.translatable("wh_npcs.ui.actions.cast_none").getString()
+                        : (castSpellName != null ? castSpellName : shortSpellName(castSpellId));
+                g.drawString(font, name, rightX, edY() + 26,
+                        castSpellId.isBlank() ? VanillaUIHelper.TEXT_DARK_GRAY : VanillaUIHelper.TEXT_WHITE, false);
+
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.cast_level").getString(),
+                        rightX, edY() + 48, VanillaUIHelper.TEXT_GRAY, false);
+                int lx = rightX + 92;
+                boolean minusHover = isOver(mouseX, mouseY, lx, edY() + 44, 16, 16);
+                VanillaUIHelper.drawButton(g, lx, edY() + 44, 16, 16, minusHover);
+                g.drawCenteredString(font, "−", lx + 8, edY() + 48, VanillaUIHelper.TEXT_WHITE);
+                g.drawCenteredString(font, String.valueOf(castLevel), lx + 34, edY() + 48, VanillaUIHelper.TEXT_AQUA);
+                boolean plusHover = isOver(mouseX, mouseY, lx + 52, edY() + 44, 16, 16);
+                VanillaUIHelper.drawButton(g, lx + 52, edY() + 44, 16, 16, plusHover);
+                g.drawCenteredString(font, "+", lx + 60, edY() + 48, VanillaUIHelper.TEXT_WHITE);
+
+                g.drawString(font, Component.translatable("wh_npcs.ui.actions.cast_target").getString(),
+                        rightX, edY() + 70, VanillaUIHelper.TEXT_GRAY, false);
+                boolean pHover = isOver(mouseX, mouseY, rightX, edY() + 84, 92, 18);
+                VanillaUIHelper.drawButton(g, rightX, edY() + 84, 92, 18, pHover || !castTargetSelf);
+                g.drawCenteredString(font, Component.translatable("wh_npcs.ui.actions.cast_target_player").getString(),
+                        rightX + 46, edY() + 89, !castTargetSelf ? VanillaUIHelper.TEXT_YELLOW
+                                : (pHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA));
+                boolean sHover = isOver(mouseX, mouseY, rightX + 98, edY() + 84, 92, 18);
+                VanillaUIHelper.drawButton(g, rightX + 98, edY() + 84, 92, 18, sHover || castTargetSelf);
+                g.drawCenteredString(font, Component.translatable("wh_npcs.ui.actions.cast_target_self").getString(),
+                        rightX + 98 + 46, edY() + 89, castTargetSelf ? VanillaUIHelper.TEXT_YELLOW
+                                : (sHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA));
+
+                g.drawString(font, Component.translatable(
+                                com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()
+                                        ? "wh_npcs.ui.actions.cast_note"
+                                        : "wh_npcs.ui.actions.cast_need_iss").getString(),
+                        rightX, edY() + 110, VanillaUIHelper.TEXT_DARK_GRAY, false);
+            }
             default -> g.drawString(font,
                     Component.translatable("wh_npcs.ui.actions.json_only", action.type()).getString(),
                     rightX, edY() + 18, VanillaUIHelper.TEXT_STATUS, false);
@@ -1570,12 +1712,16 @@ public class ActionsEditorScreen extends ScaledScreen {
             int col = i / rows;
             int x = bx + 6 + col * (colW + colGap);
             int y = by + 26 + (i % rows) * 26;
+            // «Кастовать» без Iron's Spells недоступен — серим и не подсвечиваем (по образцу кнопки «Магия»)
+            boolean disabled = "cast_spell".equals(type.type())
+                    && !com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded();
             boolean infoHover = isOver(mouseX, mouseY, x + colW - 22, y + 4, 16, 16);
             boolean hovered = !infoHover && isOver(mouseX, mouseY, x, y, colW, 24);
-            VanillaUIHelper.drawButton(g, x, y, colW, 24, hovered);
+            VanillaUIHelper.drawButton(g, x, y, colW, 24, hovered && !disabled);
             g.drawString(font, font.plainSubstrByWidth(
                     Component.translatable(type.label()).getString(), colW - 30), x + 6, y + 4,
-                    hovered ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE, false);
+                    disabled ? VanillaUIHelper.TEXT_DARK_GRAY
+                            : (hovered ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_WHITE), false);
             g.drawString(font, font.plainSubstrByWidth(
                     Component.translatable(type.description()).getString(), colW - 30), x + 6, y + 14,
                     VanillaUIHelper.TEXT_DARK_GRAY, false);
@@ -1583,6 +1729,8 @@ public class ActionsEditorScreen extends ScaledScreen {
                     infoHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
             if (infoHover) {
                 hoveredDetail = Component.translatable(type.detail()).getString();
+            } else if (disabled && hovered) {
+                hoveredDetail = Component.translatable("wh_npcs.ui.actions.cast_need_iss").getString();
             }
         }
         if (hoveredDetail != null) {
@@ -1626,6 +1774,11 @@ public class ActionsEditorScreen extends ScaledScreen {
                         return true;
                     }
                     if (isOver(mouseX, mouseY, x, rowY, colW, 24)) {
+                        // Без Iron's Spells «Кастовать» выбрать нельзя — пункт задизейблен
+                        if ("cast_spell".equals(TYPES.get(i).type())
+                                && !com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()) {
+                            return true;
+                        }
                         typePicker = false;
                         addAction(TYPES.get(i));
                         return true;
@@ -2025,6 +2178,43 @@ public class ActionsEditorScreen extends ScaledScreen {
                 }
                 if (isOver(mouseX, mouseY, rightX, edY() + 112, 200, 12)) {
                     csHeal = !csHeal;
+                    writeBack();
+                    return true;
+                }
+            }
+            case "cast_spell" -> {
+                if (rightClick) {
+                    return false;
+                }
+                if (isOver(mouseX, mouseY, rightX, edY() + 2, 160, 18)) {
+                    if (com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded() && minecraft != null) {
+                        writeBack();
+                        minecraft.setScreen(new SpellPickerScreen(this, castSpellId, id -> {
+                            castSpellId = id;
+                            castSpellName = lookupSpellName(id);
+                            writeBack();
+                        }));
+                    }
+                    return true;
+                }
+                int lx = rightX + 92;
+                if (isOver(mouseX, mouseY, lx, edY() + 44, 16, 16)) {
+                    castLevel = Math.max(1, castLevel - 1);
+                    writeBack();
+                    return true;
+                }
+                if (isOver(mouseX, mouseY, lx + 52, edY() + 44, 16, 16)) {
+                    castLevel = Math.min(10, castLevel + 1);
+                    writeBack();
+                    return true;
+                }
+                if (isOver(mouseX, mouseY, rightX, edY() + 84, 92, 18)) {
+                    castTargetSelf = false;
+                    writeBack();
+                    return true;
+                }
+                if (isOver(mouseX, mouseY, rightX + 98, edY() + 84, 92, 18)) {
+                    castTargetSelf = true;
                     writeBack();
                     return true;
                 }

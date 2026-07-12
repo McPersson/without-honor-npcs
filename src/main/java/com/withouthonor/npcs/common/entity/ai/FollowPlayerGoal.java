@@ -58,6 +58,14 @@ public class FollowPlayerGoal extends Goal {
 
     @Override
     public boolean canUse() {
+        // #3: сцена смерти (эмоция перед смертью) — NPC заморожен, следование не стартует.
+        if (npc.isDeathStaged()) {
+            return false;
+        }
+        // В бою следование уступает: пока есть живая цель, не разворачиваем NPC к игроку («челнок»).
+        if (npc.getTarget() != null && npc.getTarget().isAlive()) {
+            return false;
+        }
         Player p = npc.getFollowTarget();
         if (p == null || p.isSpectator() || npc.isPassenger()) {
             return false;
@@ -79,6 +87,13 @@ public class FollowPlayerGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
+        // #3: сцена смерти началась посреди следования — немедленно останавливаемся.
+        if (npc.isDeathStaged()) {
+            return false;
+        }
+        if (npc.getTarget() != null && npc.getTarget().isAlive()) {
+            return false; // бой начался посреди следования — уступаем боевой цели
+        }
         Player p = npc.getFollowTarget();
         if (p == null || p != this.target || p.isSpectator() || npc.isPassenger()) {
             return false;

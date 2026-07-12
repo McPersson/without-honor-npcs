@@ -137,6 +137,34 @@ public class CompanionEntity extends PathfinderMob
     private int cfgIdleWanderRadius;
     private boolean cfgPanic;
     private boolean cfgPursueAttacker = true;
+    // Провокация (кэш из профиля)
+    private boolean cfgProvokeEnabled = true;
+    private int cfgProvokeHits = 3;
+    private int cfgProvokeHpPct = 15;
+    private int cfgProvokeWindowTicks = 200;
+    private boolean cfgProvokeIgnoreEscort = true;
+    private int cfgForgiveAfterTicks = 400;
+    /** Накопление случайных ударов игрока: удары, суммарный урон, тик последнего удара. */
+    private static final class ProvokeEntry {
+        int hits;
+        float damage;
+        int lastHitTick;
+    }
+    /** Транзиент, per-UUID, кламп 16 записей; чистка по окну лениво в hurt(). */
+    private final java.util.Map<java.util.UUID, ProvokeEntry> provokeState = new java.util.HashMap<>();
+    private int lastHurtByPlayerTick = -100000; // тик последнего удара любого игрока — для прощения
+    private boolean cfgEscortNoHarm = true; // #6: напарник не ранит сопровождаемого игрока
+    // #3: эмоция перед смертью
+    private String cfgDeathEmoteId = "";
+    private String cfgDeathEmoteName = "";
+    private String cfgDeathEmoteAuthor = "";
+    private float cfgDeathEmoteSecs = 3.0F;
+    private boolean deathStaged; // идёт инсценировка смерти (неуязвим, ИИ заморожен)
+    private boolean deathStageFinished; // финальная смерть после сцены запущена (одноразовость)
+    private boolean deathTailDone; // посмертный хвост (фразы/реакции/дропы/Graveyard) исполнен ровно раз
+    private int deathStageTicks;
+    @javax.annotation.Nullable
+    private net.minecraft.world.damagesource.DamageSource deathStageSource; // снапшот убийцы
     private boolean cfgHoldPosition;
     private boolean cfgAvoidSun;
     private boolean cfgBurnInSun;
@@ -673,6 +701,9 @@ public class CompanionEntity extends PathfinderMob
             return false;
         }
         if (!level().isClientSide) {
+            if (deathStaged) {
+                return true; // идёт инсценировка смерти — неуязвим (кроме bypass выше)
+            }
             CompanionProfile profile = profileId != null ? ProfileManager.get().get(profileId) : null;
             return profile == null || !profile.isAttackable();
         }
@@ -689,12 +720,42 @@ public class CompanionEntity extends PathfinderMob
         if (getHealth() > getMaxHealth()) {
             setHealth(getMaxHealth());
         }
+        applyMagicAttributes(profile);
         rebuildCombatGoals(profile);
+    }
+
+    /**
+     * Атрибуты Iron's Spells (школьные резисты/силы + общие). Резолвим по строковому id через
+     * ForgeRegistries — классы ISS сюда не тянем (план §3.1). Проставляем ВСЕ известные атрибуты,
+     * а не только заданные: иначе снятое в редакторе значение осталось бы висеть на сущности.
+     */
+    private void applyMagicAttributes(CompanionProfile profile) {
+        if (!com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()) {
+            return;
+        }
+        for (String id : com.withouthonor.npcs.compat.Compat.ironsSpells().magicAttributeIds()) {
+            net.minecraft.resources.ResourceLocation rl = net.minecraft.resources.ResourceLocation.tryParse(id);
+            net.minecraft.world.entity.ai.attributes.Attribute attr = rl == null
+                    ? null
+                    : net.minecraftforge.registries.ForgeRegistries.ATTRIBUTES.getValue(rl);
+            if (attr == null) {
+                com.withouthonor.npcs.WHCompanions.LOGGER.warn("[WH ISS] Атрибут '{}' не найден в реестре", id);
+                continue;
+            }
+            var instance = getAttribute(attr);
+            if (instance != null) {
+                instance.setBaseValue(profile.getMagicAttr(id));
+            }
+        }
     }
 
     private void rebuildCombatGoals(CompanionProfile profile) {
         if (level().isClientSide) {
             return;
+        }
+        if (com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()) {
+            // Цели пересобираются (профиль сохранён/синкнут) — активный каст осиротел, гасим его.
+            com.withouthonor.npcs.compat.Compat.ironsSpells().cancel(this);
         }
         cacheFollowSettings(profile);
 
@@ -736,9 +797,12 @@ public class CompanionEntity extends PathfinderMob
             } else if (weapon instanceof net.minecraft.world.item.BowItem) {
                 this.goalSelector.addGoal(2, new com.withouthonor.npcs.common.entity.ai.NpcBowAttackGoal(
                         this, 1.0D, interval, range));
-            } else if (weapon instanceof net.minecraft.world.item.TridentItem) {
+            } else if (isThrowableSpear(getFunctionalItem(net.minecraft.world.entity.EquipmentSlot.MAINHAND))) {
                 this.goalSelector.addGoal(2, new com.withouthonor.npcs.common.entity.ai.NpcTridentAttackGoal(
                         this, 1.0D, interval, range));
+                // Фолбэк: если модовое копьё не метается (кэш) → цель отвалится, добиваем в melee (прио 3).
+                this.goalSelector.addGoal(3, new net.minecraft.world.entity.ai.goal.MeleeAttackGoal(
+                        this, profile.getMeleeChaseSpeed(), true));
             } else if (throwableAmmo) {
                 this.goalSelector.addGoal(2, new net.minecraft.world.entity.ai.goal.RangedAttackGoal(
                         this, 1.0D, interval, range));
@@ -754,6 +818,37 @@ public class CompanionEntity extends PathfinderMob
             if (cfgPotionAllyEnabled) {
                 this.goalSelector.addGoal(3,
                         new com.withouthonor.npcs.common.entity.ai.WitchHealGoal(this));
+            }
+        } else if ("mage".equals(preset)) {
+            net.minecraft.world.entity.ai.goal.Goal mageGoal =
+                    com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()
+                            ? com.withouthonor.npcs.compat.Compat.ironsSpells().buildMageGoal(this, profile)
+                            : null;
+            if (mageGoal != null) {
+                this.goalSelector.addGoal(2, mageGoal);
+                // Гибрид: ближний бой, когда враг вплотную (ниже приоритетом, чем каст).
+                this.goalSelector.addGoal(3, new net.minecraft.world.entity.ai.goal.MeleeAttackGoal(
+                        this, profile.getMeleeChaseSpeed(), true));
+            } else {
+                // Без ISS или пустой/невалидный лоадаут — откат к ближнему бою, NPC не беспомощен (план §3.1).
+                if (com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()) {
+                    com.withouthonor.npcs.WHCompanions.LOGGER.warn(
+                            "[WH ISS] Пресет «Маг» без валидных спеллов — откат к ближнему бою");
+                }
+                addMeleeGoals(profile);
+            }
+            // Поддержка союзников: отдельная связка ISS (SupportMob + искатель цели + WizardSupportGoal).
+            // Лечит/бафает своих (фракция/хозяин), приоритет выше атаки. shouldHealEntity-миксин — для AoE-хилов.
+            if (com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded() && profile.isSupportAllies()) {
+                net.minecraft.world.entity.ai.goal.Goal supGoal =
+                        com.withouthonor.npcs.compat.Compat.ironsSpells().buildSupportCastGoal(this, profile);
+                if (supGoal != null) {
+                    this.goalSelector.addGoal(1, supGoal);
+                    // Приоритет 4 (хуже агро-целей 2/3): FindSupportableTargetGoal — это TargetGoal с
+                    // Flag.TARGET, на равном приоритете он не даёт агро-цели запуститься.
+                    this.targetSelector.addGoal(4,
+                            com.withouthonor.npcs.compat.Compat.ironsSpells().buildSupportFinderGoal(this));
+                }
             }
         } else {
             addMeleeGoals(profile);
@@ -790,8 +885,10 @@ public class CompanionEntity extends PathfinderMob
             this.goalSelector.addGoal(2,
                     new net.minecraft.world.entity.ai.goal.LeapAtTargetGoal(this, profile.getLeapStrength()));
         }
+        // followingTargetEvenIfNotSeen=true: цель держится, пока враг жив и в FOLLOW_RANGE, не гаснет
+        // на каждом ударе (иначе MOVE освобождается и follow-цель разворачивает NPC к игроку — «челнок»).
         this.goalSelector.addGoal(2, new net.minecraft.world.entity.ai.goal.MeleeAttackGoal(
-                this, profile.getMeleeChaseSpeed(), false));
+                this, profile.getMeleeChaseSpeed(), true));
     }
 
     private boolean isHostileFactionTarget(net.minecraft.world.entity.LivingEntity target) {
@@ -892,6 +989,103 @@ public class CompanionEntity extends PathfinderMob
                 .getItem() instanceof net.minecraft.world.item.ProjectileWeaponItem;
     }
 
+    // --- Метаемые копья (ваниль-трезубец + модовые через FakePlayer) ---
+
+    /** Датапак-тег для ручного расширения списка метаемых копий (по умолчанию пуст). */
+    private static final net.minecraft.tags.TagKey<net.minecraft.world.item.Item> THROWABLE_SPEARS =
+            net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM,
+                    net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("wh_npcs", "throwable_spears"));
+
+    /** Фиктивный профиль FakePlayer, от лица которого модовое копьё вызывает releaseUsing. */
+    private static final com.mojang.authlib.GameProfile WH_SPEAR_PROFILE = new com.mojang.authlib.GameProfile(
+            java.util.UUID.fromString("b5c1e0a2-6f7d-4c3a-9e10-77a5c0de5000"), "[wh_npcs_spear]");
+
+    /** Item'ы, у которых модовый бросок не сработал в рантайме — больше не метаем (транзиент, identity). */
+    private final java.util.Set<net.minecraft.world.item.Item> nonThrowableSpears =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+    /** Ваниль-тег (command tag) наших метательных снарядов — по нему секундный скан находит «зависшие» возвратные. */
+    private static final String THROWN_PROJECTILE_TAG = "wh_npc_thrown";
+
+    /** Транзиент: NPC хотя бы раз метал снаряд — без этого секундный скан возвратных снарядов не делаем. */
+    private boolean hasThrownProjectiles;
+
+    /** Метаемое копьё: ваниль-трезубец, датапак-тег, forge:tools/tridents, либо SPEAR-анимация с заметным зарядом (не лук/арбалет). */
+    public static boolean isThrowableSpear(net.minecraft.world.item.ItemStack s) {
+        if (s.isEmpty()) {
+            return false;
+        }
+        if (s.getItem() instanceof net.minecraft.world.item.TridentItem || s.is(THROWABLE_SPEARS)
+                || s.is(net.minecraftforge.common.Tags.Items.TOOLS_TRIDENTS)) { // модовые трезубцы, помеченные конвенцией Forge
+            return true;
+        }
+        return s.getUseAnimation() == net.minecraft.world.item.UseAnim.SPEAR
+                && s.getUseDuration() >= 20
+                && !(s.getItem() instanceof net.minecraft.world.item.ProjectileWeaponItem);
+    }
+
+    /** isThrowableSpear с учётом рантайм-кэша неудач — метать это копьё или уйти в melee. */
+    public boolean canThrowSpear(net.minecraft.world.item.ItemStack s) {
+        return isThrowableSpear(s) && !nonThrowableSpears.contains(s.getItem());
+    }
+
+    /**
+     * Бросок модового копья через FakePlayer: releaseUsing мода спавнит ИХ снаряд с ИХ уроном/эффектами.
+     * После спавна перевешиваем owner на NPC (kill-credit + friendly-fire гейты). Не сработало → кэш.
+     */
+    private void throwModdedSpear(net.minecraft.world.entity.LivingEntity target,
+                                  net.minecraft.world.item.ItemStack weapon, double dx, double dz, double horizontal) {
+        if (!(level() instanceof net.minecraft.server.level.ServerLevel serverLevel)) {
+            return;
+        }
+        net.minecraftforge.common.util.FakePlayer fake =
+                net.minecraftforge.common.util.FakePlayerFactory.get(serverLevel, WH_SPEAR_PROFILE);
+        fake.setPos(getX(), getEyeY() - fake.getEyeHeight(), getZ());
+        double dy = target.getEyeY() - getEyeY();
+        float yaw = (float) (Math.atan2(dz, dx) * (180.0D / Math.PI)) - 90.0F;
+        float pitch = (float) (-(Math.atan2(dy, horizontal) * (180.0D / Math.PI)));
+        // Spartan и др. читают и СТАРЫЕ углы — выставляем оба.
+        fake.setYRot(yaw);
+        fake.yRotO = yaw;
+        fake.yHeadRot = yaw;
+        fake.setXRot(pitch);
+        fake.xRotO = pitch;
+        net.minecraft.world.item.ItemStack copy = weapon.copy(); // копия: NPC оружие не теряет, мутации мода уходят с копией
+        fake.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, copy);
+        int timeLeft = Math.max(0, copy.getUseDuration() - 20); // 20 тиков заряда — покрывают пороги обследованных модов
+        try {
+            try {
+                copy.getItem().releaseUsing(copy, serverLevel, fake, timeLeft);
+            } catch (Throwable t) {
+                com.withouthonor.npcs.WHCompanions.LOGGER.warn(
+                        "[WH] Модовое копьё '{}' бросилось с ошибкой, отключаю метание: {}",
+                        weapon.getItem(), t.toString());
+                nonThrowableSpears.add(weapon.getItem());
+                return;
+            }
+            java.util.List<net.minecraft.world.entity.projectile.Projectile> spawned =
+                    serverLevel.getEntitiesOfClass(net.minecraft.world.entity.projectile.Projectile.class,
+                            fake.getBoundingBox().inflate(2.0D), p -> p.tickCount == 0 && p.getOwner() == fake);
+            if (spawned.isEmpty()) {
+                nonThrowableSpears.add(weapon.getItem()); // мод не заспавнил снаряд — больше не пытаемся, уходим в melee
+                return;
+            }
+            for (net.minecraft.world.entity.projectile.Projectile p : spawned) {
+                p.setOwner(this); // kill-credit NPC + наши friendly-fire гейты (#6)
+                p.addTag(THROWN_PROJECTILE_TAG); // метка для скана возвратных: у не-игрока снаряд подобрать некому
+                if (p instanceof net.minecraft.world.entity.projectile.AbstractArrow aa) {
+                    aa.pickup = net.minecraft.world.entity.projectile.AbstractArrow.Pickup.DISALLOWED;
+                }
+            }
+            hasThrownProjectiles = true;
+            swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+        } finally {
+            // FakePlayer кэшируется до выгрузки мира — копия копья не должна висеть у него в руке.
+            fake.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND,
+                    net.minecraft.world.item.ItemStack.EMPTY);
+        }
+    }
+
     @Override
     public void performRangedAttack(net.minecraft.world.entity.LivingEntity target, float power) {
         if (cfgIsWitch) {
@@ -906,11 +1100,17 @@ public class CompanionEntity extends PathfinderMob
         if (weapon.getItem() instanceof net.minecraft.world.item.TridentItem) {
             var trident = new net.minecraft.world.entity.projectile.ThrownTrident(level(), this, weapon.copy());
             trident.pickup = net.minecraft.world.entity.projectile.AbstractArrow.Pickup.DISALLOWED;
+            trident.addTag(THROWN_PROJECTILE_TAG); // Loyalty вернёт его к NPC, а «всасывание» есть только в playerTouch
+            hasThrownProjectiles = true;
             double dy = target.getY(0.3333333333333333D) - trident.getY();
             trident.shoot(dx, dy + horizontal * 0.2D, dz, 1.6F, 4.0F);
             playSound(net.minecraft.sounds.SoundEvents.DROWNED_SHOOT, 1.0F,
                     1.0F / (getRandom().nextFloat() * 0.4F + 0.8F));
             level().addFreshEntity(trident);
+            return;
+        }
+        if (canThrowSpear(weapon)) {
+            throwModdedSpear(target, weapon, dx, dz, horizontal);
             return;
         }
         net.minecraft.world.item.ItemStack ammo = getArrowItem();
@@ -1167,6 +1367,13 @@ public class CompanionEntity extends PathfinderMob
         cfgLookRadius = Math.max(1, Math.min(16, profile.getLookRadius()));
         cfgBoatRide = profile.isBoatRide();
         cfgPursueAttacker = profile.isPursueAttacker();
+        cfgProvokeEnabled = profile.isProvokeEnabled();
+        cfgProvokeHits = profile.getProvokeHits();
+        cfgProvokeHpPct = profile.getProvokeHpPct();
+        cfgProvokeWindowTicks = profile.getProvokeWindowSec() * 20;
+        cfgProvokeIgnoreEscort = profile.isProvokeIgnoreEscort();
+        cfgForgiveAfterTicks = profile.getForgiveAfterSec() * 20;
+        cfgEscortNoHarm = profile.isEscortNoHarmOwner();
         cfgHoldPosition = profile.isHoldPosition();
         cfgIdleWander = profile.isIdleWander();
         cfgIdleWanderRadius = profile.getIdleWanderRadius();
@@ -1186,6 +1393,10 @@ public class CompanionEntity extends PathfinderMob
         this.cfgShieldCooldownTicks = Math.round(profile.getShieldCooldownSeconds() * 20.0F);
         this.entityData.set(DATA_IDLE_EMOTE, profile.getIdleEmoteId().isEmpty() ? ""
                 : packEmote(profile.getIdleEmoteId(), profile.getIdleEmoteName(), profile.getIdleEmoteAuthor()));
+        cfgDeathEmoteId = profile.getDeathEmoteId();
+        cfgDeathEmoteName = profile.getDeathEmoteName();
+        cfgDeathEmoteAuthor = profile.getDeathEmoteAuthor();
+        cfgDeathEmoteSecs = profile.getDeathEmoteSecs();
         cfgMobType = switch (profile.getMobType()) {
             case "undead" -> net.minecraft.world.entity.MobType.UNDEAD;
             case "arthropod" -> net.minecraft.world.entity.MobType.ARTHROPOD;
@@ -1298,10 +1509,22 @@ public class CompanionEntity extends PathfinderMob
             }
         }
         boolean damaged = super.hurt(source, amount);
+        // Провокация: до порога терпим случайные удары ИГРОКА (super.hurt уже вызвал setLastHurtByMob).
+        // suppressed=true → аргро подавлено (гасим и HurtByTargetGoal, и ветку PursueAttackerGoal).
+        boolean suppressed = damaged && !level().isClientSide && handleProvocation(source, amount);
+        // Полностью заблокированный щитом удар: ваниль СТАВИТ setLastHurtByMob, но возвращает false →
+        // без гейта щитовик агрится с первого удара в поднятый щит. Блок СЧИТАЕТСЯ ударом (hits++),
+        // но в счётчик урона идёт фактический урон = 0.
+        if (!damaged && !level().isClientSide
+                && source.getEntity() instanceof ServerPlayer blockedBy
+                && getLastHurtByMob() == blockedBy) {
+            handleProvocation(source, 0F);
+        }
         if (damaged && !level().isClientSide && !cfgOnHurt.isEmpty()) {
+            // Реакции на удар играются независимо от провокации.
             runReactions(cfgOnHurt, source.getEntity() instanceof ServerPlayer sp ? sp : nearestServerPlayer(16));
         }
-        if (damaged && !level().isClientSide && cfgPursueAttacker && getTarget() == null
+        if (damaged && !level().isClientSide && !suppressed && cfgPursueAttacker && getTarget() == null
                 && source.getEntity() instanceof net.minecraft.world.entity.LivingEntity attacker
                 && attacker != this && isConfiguredAggressorTarget(attacker)) {
             double follow = getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.FOLLOW_RANGE);
@@ -1310,6 +1533,89 @@ public class CompanionEntity extends PathfinderMob
             }
         }
         return damaged;
+    }
+
+    /**
+     * Порог терпимости к случайным ударам игрока. Возвращает true, если аргро подавлено
+     * (накопили удар, порог ещё не достигнут) — тогда снимаем lastHurtByMob, чтобы HurtByTargetGoal
+     * не сработал. Порог = N ударов ИЛИ ≥X% max HP за окно (что раньше). Осознанная враждебность
+     * (агро фракций) не трогается — этот гейт только про прямой урон игрока-«не-врага».
+     */
+    private boolean handleProvocation(net.minecraft.world.damagesource.DamageSource source, float amount) {
+        if (!cfgProvokeEnabled || !(source.getEntity() instanceof ServerPlayer player)) {
+            return false;
+        }
+        // FakePlayer (машины/турели модов) — не «случайный удар игрока»: агрим как на обычного моба.
+        if (player instanceof net.minecraftforge.common.util.FakePlayer) {
+            return false;
+        }
+        // Прощение — per-target: тик обновляем только если бьёт ТЕКУЩАЯ цель, иначе удар любого
+        // игрока (даже сопровождаемого) откладывал бы прощение чужой цели.
+        if (player == getTarget()) {
+            lastHurtByPlayerTick = tickCount;
+        }
+        // Игрок во враждебном тире репутации — настоящий враг, провокация не применяется.
+        if (isHostileFactionPlayer(player)) {
+            return false;
+        }
+        // Сопровождаемый игрок никогда не агрит (счётчики даже не копятся).
+        if (cfgProvokeIgnoreEscort) {
+            Player escort = followedPlayer();
+            if (escort != null && escort.getUUID().equals(player.getUUID())) {
+                setLastHurtByMob(null);
+                return true;
+            }
+        }
+        pruneProvokeState();
+        ProvokeEntry e = provokeState.computeIfAbsent(player.getUUID(), k -> new ProvokeEntry());
+        if (tickCount - e.lastHitTick > cfgProvokeWindowTicks) {
+            e.hits = 0;
+            e.damage = 0F; // окно истекло — начинаем заново
+        }
+        e.hits++;
+        e.damage += amount;
+        e.lastHitTick = tickCount;
+        boolean byHits = e.hits >= cfgProvokeHits;
+        boolean byDamage = cfgProvokeHpPct > 0 && e.damage >= getMaxHealth() * (cfgProvokeHpPct / 100.0F);
+        if (byHits || byDamage) {
+            provokeState.remove(player.getUUID()); // порог пройден — агрим нормально, счётчик сброшен
+            lastHurtByPlayerTick = tickCount; // этот игрок сейчас станет целью — стартуем окно прощения
+            return false;
+        }
+        setLastHurtByMob(null);
+        return true;
+    }
+
+    /** Удаляет истёкшие по окну записи + держит карту в пределах 16 (защита от утечки). */
+    private void pruneProvokeState() {
+        provokeState.entrySet().removeIf(en -> tickCount - en.getValue().lastHitTick > cfgProvokeWindowTicks);
+        // >= 16: prune зовётся ДО computeIfAbsent — освобождаем место под новую запись заранее,
+        // иначе карта разрасталась до 17.
+        while (provokeState.size() >= 16) {
+            var oldest = provokeState.entrySet().stream()
+                    .min(java.util.Comparator.comparingInt(en -> en.getValue().lastHitTick));
+            if (oldest.isEmpty()) {
+                break;
+            }
+            provokeState.remove(oldest.get().getKey());
+        }
+    }
+
+    /** Прощение: цель-игрок долго не бил → снять цель (зовётся из серверного тика). */
+    private void tickForgiveness() {
+        if (!cfgProvokeEnabled || cfgForgiveAfterTicks <= 0) {
+            return;
+        }
+        if (!(getTarget() instanceof ServerPlayer player)) {
+            return;
+        }
+        if (isHostileFactionPlayer(player)) {
+            return; // враг по фракции — не прощаем
+        }
+        if (tickCount - lastHurtByPlayerTick >= cfgForgiveAfterTicks) {
+            setTarget(null);
+            setLastHurtByMob(null);
+        }
     }
 
     private int resistanceFor(net.minecraft.world.damagesource.DamageSource source) {
@@ -1433,6 +1739,39 @@ public class CompanionEntity extends PathfinderMob
     public void refreshTotem() {
         this.totemUsesLeft = this.cfgTotemCharges;
         updateTotemArmed();
+    }
+
+    /**
+     * Считает ли этот NPC {@code other} своим союзником для поддержки (лечения/бафов) Iron's Spells.
+     * Зовётся из миксина в Utils.shouldHealEntity (ISS про наши фракции/следование сам не знает).
+     * Союзник = хозяин (кого следуем) или другой NPC той же фракции. Только при включённой опции.
+     *
+     * Строго серверный метод: Utils.shouldHealEntity зовётся в т.ч. из тика снарядов ISS, который
+     * идёт на обеих сторонах, а ProfileManager.get() на клиенте кидает IllegalStateException.
+     */
+    public boolean whIsSupportAlly(net.minecraft.world.entity.Entity other) {
+        if (level().isClientSide || other == null || other == this || profileId == null) {
+            return false;
+        }
+        CompanionProfile p = ProfileManager.get().get(profileId);
+        if (p == null || !p.isSupportAllies()) {
+            return false;
+        }
+        // followedPlayer() покрывает ОБА пути следования (ручное FOLLOW и авто-следование из профиля);
+        // followTargetId ставит только ручное, поэтому по нему одному авто-следование не распознавалось.
+        Player followed = followedPlayer();
+        if (followed != null && followed.getUUID().equals(other.getUUID())) {
+            return true;
+        }
+        if (other instanceof CompanionEntity oc && oc.profileId != null) {
+            String mine = p.getFaction();
+            if (mine == null || mine.isEmpty()) {
+                return false;
+            }
+            CompanionProfile op = ProfileManager.get().get(oc.profileId);
+            return op != null && mine.equals(op.getFaction());
+        }
+        return false;
     }
 
     @Nullable
@@ -1820,6 +2159,11 @@ public class CompanionEntity extends PathfinderMob
         }
     }
 
+    /** #3: идёт ли сцена смерти (эмоция перед смертью) — ранний гейт для целей движения. */
+    public boolean isDeathStaged() {
+        return deathStaged;
+    }
+
     @Override
     public void tick() {
         super.tick();
@@ -1831,8 +2175,51 @@ public class CompanionEntity extends PathfinderMob
         }
         if (!level().isClientSide) {
 
+            // #3 Инсценировка смерти: держим ИИ замороженным, по таймеру — настоящая смерть.
+            // После запуска финальной смерти (deathStageFinished) блок больше не входит:
+            // ваниль сама доигрывает tickDeath и убирает труп.
+            if (deathStaged && !deathStageFinished) {
+                setTarget(null); // страховка: цели движения гейтятся и через isDeathStaged()
+                getNavigation().stop();
+                if (--deathStageTicks <= 0) {
+                    deathStageFinished = true; // одноразово: die() ниже — финальный
+                    sendEmotecraftEmote(""); // стоп эмоции (как действие StopEmotecraftEmote)
+                    net.minecraft.world.damagesource.DamageSource s = deathStageSource != null
+                            ? deathStageSource : damageSources().generic();
+                    setHealth(0.0F); // иначе ваниль tickDeath при 1 HP никогда не удалит труп
+                    die(s); // deathStageFinished==true → мимо тотема и инсценировки в super.die
+                }
+                return; // пока умираем — остальной тик не нужен
+            }
+
+            // Тик-драйвер каста Iron's Spells (ноль работы без активного каста; без ISS — noop)
+            if (com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()) {
+                com.withouthonor.npcs.compat.Compat.ironsSpells().tick(this);
+            }
+
             if (tickCount % 200 == 0) {
                 updateIndex();
+            }
+
+            if (tickCount % 20 == 0) {
+                tickForgiveness();
+            }
+
+            // #4: возвратные снаряды (Loyalty-трезубец, модовые копья вроде Extinction Spear) летят к владельцу-NPC,
+            // но «всасывание» ваниль/моды делают только в playerTouch — у моба подобрать снаряд некому,
+            // и он вечно кружит у головы. Секундный скан вокруг NPC: наш тег + снаряд «пожил» → discard.
+            // Воткнувшееся в землю копьё далеко от NPC — вне бокса; прилетевшее обратно — ровно наш случай.
+            if (hasThrownProjectiles && tickCount % 20 == 6) {
+                for (net.minecraft.world.entity.projectile.Projectile p : level().getEntitiesOfClass(
+                        net.minecraft.world.entity.projectile.Projectile.class, getBoundingBox().inflate(3.0D))) {
+                    if (p.getTags().contains(THROWN_PROJECTILE_TAG) && p.tickCount > 60) {
+                        p.discard();
+                    }
+                }
+            }
+
+            if (!pendingActions.isEmpty()) {
+                tickPendingActions();
             }
 
             if (tickCount % 40 == 0) {
@@ -1938,6 +2325,95 @@ public class CompanionEntity extends PathfinderMob
             }
         }
         return null;
+    }
+
+    // --- Отложенные действия диалога (действие «Ждать», #2) ---
+    private static final class PendingActions {
+        final java.util.List<com.withouthonor.npcs.common.dialogue.action.DialogueAction> actions;
+        final java.util.UUID playerUuid;
+        int ticksLeft;
+        PendingActions(java.util.List<com.withouthonor.npcs.common.dialogue.action.DialogueAction> a,
+                       java.util.UUID uuid, int ticks) {
+            this.actions = a;
+            this.playerUuid = uuid;
+            this.ticksLeft = ticks;
+        }
+    }
+    /** Транзиент (НЕ переживает рестарт мира), кап 8: остаток списка после wait, ждёт таймера. */
+    private final java.util.List<PendingActions> pendingActions = new java.util.ArrayList<>();
+
+    /** Поставить остаток действий на отложенный запуск (зовётся из DialogueAction.executeFrom). */
+    public void queueDelayedActions(
+            java.util.List<com.withouthonor.npcs.common.dialogue.action.DialogueAction> actions,
+            java.util.UUID playerUuid, int ticks) {
+        if (actions.isEmpty()) {
+            return;
+        }
+        if (pendingActions.size() >= 8) {
+            com.withouthonor.npcs.WHCompanions.LOGGER.warn(
+                    "Очередь wait-действий NPC '{}' переполнена (кап 8) — старейшая запись отброшена",
+                    getName().getString());
+            pendingActions.remove(0); // переполнение — роняем старейшую
+        }
+        pendingActions.add(new PendingActions(actions, playerUuid, ticks));
+    }
+
+    /** Тик отложенных действий: по нулю таймера — резолв игрока и исполнение остатка. */
+    private void tickPendingActions() {
+        net.minecraft.server.MinecraftServer server = level().getServer();
+        if (pendingActions.isEmpty() || server == null) {
+            return;
+        }
+        // Два прохода: сначала снимаем созревшие из списка, ПОТОМ исполняем — иначе цепочка
+        // wait→…→wait добавит новую запись через executeFrom прямо во время итерации (CME).
+        java.util.List<PendingActions> ready = null;
+        java.util.Iterator<PendingActions> it = pendingActions.iterator();
+        while (it.hasNext()) {
+            PendingActions p = it.next();
+            if (--p.ticksLeft > 0) {
+                continue;
+            }
+            it.remove();
+            if (ready == null) {
+                ready = new java.util.ArrayList<>();
+            }
+            ready.add(p);
+        }
+        if (ready == null) {
+            return;
+        }
+        for (PendingActions p : ready) {
+            ServerPlayer player = server.getPlayerList().getPlayer(p.playerUuid);
+            if (player == null || !player.isAlive() || player.level() != level() || !isAlive()) {
+                continue; // игрок офлайн/в другом мире/мёртв или NPC мёртв — тихий сброс остатка
+            }
+            com.withouthonor.npcs.common.dialogue.action.DialogueAction.executeFrom(p.actions, 0,
+                    new com.withouthonor.npcs.common.dialogue.condition.DialogueCondition.Context(player, this));
+        }
+    }
+
+    /** Сопровождаемый игрок (оба пути следования) — для гейтов дружественного огня/провокации. */
+    @javax.annotation.Nullable
+    public Player escortedPlayer() {
+        return followedPlayer();
+    }
+
+    /** #6: настройка «напарник не ранит сопровождаемого» (кэш профиля). */
+    public boolean escortNoHarm() {
+        return cfgEscortNoHarm;
+    }
+
+    /** #6: разрешён ли урон по своей фракции. Фракции нет/не найдена → true (гейт неприменим). */
+    public boolean factionAllowsFriendlyFire() {
+        if (profileId == null) {
+            return true;
+        }
+        CompanionProfile p = ProfileManager.get().get(profileId);
+        if (p == null || p.getFaction() == null) {
+            return true;
+        }
+        var f = com.withouthonor.npcs.common.reputation.FactionRegistry.get().byId(p.getFaction());
+        return f == null || f.isFriendlyFire();
     }
 
     private static float turnTowards(float from, float to, float maxDelta) {
@@ -2388,7 +2864,14 @@ public class CompanionEntity extends PathfinderMob
 
     @Override
     public void die(net.minecraft.world.damagesource.DamageSource source) {
-        if (!level().isClientSide && totemUsesLeft > 0
+        if (!level().isClientSide && com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()) {
+            // Иначе CONTINUOUS-каст остаётся «висеть»: onServerCastComplete(cancelled) не отработает.
+            com.withouthonor.npcs.compat.Compat.ironsSpells().cancel(this);
+        }
+        // Н6: при финальном die() после инсценировки тотем-ветку осознанно пропускаем — даже если
+        // профиль перезарядили во время сцены. Сцена смерти уже сыграна, спасать поздно: иначе
+        // NPC останется «замороженным» в staged-состоянии при живом тотеме.
+        if (!level().isClientSide && !deathStageFinished && totemUsesLeft > 0
                 && !source.is(net.minecraft.tags.DamageTypeTags.BYPASSES_INVULNERABILITY)) {
             totemUsesLeft--;
             updateTotemArmed();
@@ -2401,12 +2884,40 @@ public class CompanionEntity extends PathfinderMob
             this.addEffect(new net.minecraft.world.effect.MobEffectInstance(
                     net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE, 800, 0));
             this.level().broadcastEntityEvent(this, (byte) 35);
-            return;
+            return; // тотем спас — очередь wait НЕ чистим, NPC жив
         }
-        super.die(source);
+        // #3 Инсценированная смерть: тотем не спас → если задана эмоция смерти, играем её при 1 HP,
+        // затем (по таймеру, из tick) финальный die() (deathStageFinished) идёт мимо инсценировки
+        // в super.die + хвост. /kill (bypass) добивает сразу. Гейт Emotecraft — без мода ветка пропускается.
+        if (!level().isClientSide && !deathStaged && !deathStageFinished && !cfgDeathEmoteId.isEmpty()
+                && !source.is(net.minecraft.tags.DamageTypeTags.BYPASSES_INVULNERABILITY)
+                && com.withouthonor.npcs.compat.Compat.emotecraftLoaded()) {
+            deathStaged = true;
+            deathStageTicks = Math.max(1, Math.round(cfgDeathEmoteSecs * 20.0F));
+            deathStageSource = source;
+            setHealth(1.0F);
+            setTarget(null);
+            getNavigation().stop();
+            sendEmotecraftEmote(cfgDeathEmoteId, cfgDeathEmoteName, cfgDeathEmoteAuthor,
+                    nextDialogueEmoteNonce());
+            return; // до super.die — NPC ещё жив, играет эмоцию
+        }
+        // Настоящая смерть: отложенные действия wait умирают вместе с NPC (мёртвый не тикает).
+        pendingActions.clear();
+        // Закрываем сцену жёстко: если сюда попали bypass-ударом (/kill) посреди инсценировки,
+        // таймер в tick() не должен потом снова войти в staged-блок и повторно позвать die().
+        deathStaged = false;
+        deathStageFinished = true;
+        super.die(source); // при повторном вызове ваниль сама no-op (this.dead)
         if (level().isClientSide) {
             return;
         }
+        // Посмертный хвост (фразы/react_death/репутация/дропы/Graveyard) — строго один раз,
+        // даже если die() позовут повторно уже по мёртвому NPC.
+        if (deathTailDone) {
+            return;
+        }
+        deathTailDone = true;
         CompanionProfile profile = profileId != null ? ProfileManager.get().get(profileId) : null;
 
         if (profile != null && !profile.getDeathPhrases().isEmpty()) {

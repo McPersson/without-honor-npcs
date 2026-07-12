@@ -173,6 +173,23 @@ public class WhcCommand {
                         .then(Commands.literal("global")
                                 .then(Commands.argument("name", NameArgument.name()).suggests(NAME_SUGGESTIONS)
                                         .executes(ctx -> scheduleGlobal(ctx)))))
+                .then(Commands.literal("magic")
+                        .then(Commands.argument("spell", net.minecraft.commands.arguments.ResourceLocationArgument.id())
+                                .executes(ctx -> magicCast(ctx, 1))
+                                .then(Commands.argument("level", IntegerArgumentType.integer(1, 15))
+                                        .executes(ctx -> magicCast(ctx,
+                                                IntegerArgumentType.getInteger(ctx, "level"))))))
+                .then(Commands.literal("magic")
+                        .then(Commands.literal("add")
+                                .then(Commands.argument("spell", net.minecraft.commands.arguments.ResourceLocationArgument.id())
+                                        .executes(ctx -> magicLoadoutAdd(ctx, "attack"))
+                                        .then(Commands.argument("category", com.mojang.brigadier.arguments.StringArgumentType.word())
+                                                .executes(ctx -> magicLoadoutAdd(ctx,
+                                                        com.mojang.brigadier.arguments.StringArgumentType.getString(ctx, "category"))))))
+                        .then(Commands.literal("list")
+                                .executes(ctx -> magicLoadoutList(ctx)))
+                        .then(Commands.literal("clear")
+                                .executes(ctx -> magicLoadoutClear(ctx))))
                 .then(Commands.literal("flags")
                         .then(Commands.literal("get")
                                 .then(Commands.argument("player", EntityArgument.player())
@@ -213,6 +230,120 @@ public class WhcCommand {
                                         .executes(ctx -> profileImport(ctx))))));
     }
 
+    /** Прототип фазы 0 ISS: каст спелла на ближайшего NPC (8 блоков) без UI. Без ISS-импортов — всё через мост. */
+    private static int magicCast(CommandContext<CommandSourceStack> ctx, int level) throws CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        if (!com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()) {
+            ctx.getSource().sendFailure(Component.translatable("wh_npcs.msg.magic.no_iss"));
+            return 0;
+        }
+        String spellId = net.minecraft.commands.arguments.ResourceLocationArgument
+                .getId(ctx, "spell").toString();
+
+        CompanionEntity nearest = null;
+        double best = Double.MAX_VALUE;
+        for (CompanionEntity c : player.serverLevel().getEntitiesOfClass(
+                CompanionEntity.class, player.getBoundingBox().inflate(8.0D))) {
+            double d = c.distanceToSqr(player);
+            if (d < best) {
+                best = d;
+                nearest = c;
+            }
+        }
+        if (nearest == null) {
+            ctx.getSource().sendFailure(Component.translatable("wh_npcs.msg.magic.no_npc"));
+            return 0;
+        }
+
+        final CompanionEntity npc = nearest;
+        if (com.withouthonor.npcs.compat.Compat.ironsSpells().castSpell(npc, spellId, level)) {
+            ctx.getSource().sendSuccess(() -> Component.translatable(
+                    "wh_npcs.msg.magic.cast_ok", npc.getName().getString(), spellId, level), true);
+            return 1;
+        }
+        ctx.getSource().sendFailure(Component.translatable("wh_npcs.msg.magic.cast_fail", spellId));
+        return 0;
+    }
+
+    /** Ближайший NPC в 8 блоках от игрока, либо null. */
+    @javax.annotation.Nullable
+    private static CompanionEntity nearestNpc(ServerPlayer player) {
+        CompanionEntity nearest = null;
+        double best = Double.MAX_VALUE;
+        for (CompanionEntity c : player.serverLevel().getEntitiesOfClass(
+                CompanionEntity.class, player.getBoundingBox().inflate(8.0D))) {
+            double d = c.distanceToSqr(player);
+            if (d < best) {
+                best = d;
+                nearest = c;
+            }
+        }
+        return nearest;
+    }
+
+    /** Прототип-инструмент: наполнение лоадаута мага без UI. Категория: attack/defense/movement/support. */
+    private static int magicLoadoutAdd(CommandContext<CommandSourceStack> ctx, String category)
+            throws CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        String cat = switch (category.toLowerCase(java.util.Locale.ROOT)) {
+            case "defense", "movement", "support" -> category.toLowerCase(java.util.Locale.ROOT);
+            default -> "attack";
+        };
+        String spellId = net.minecraft.commands.arguments.ResourceLocationArgument.getId(ctx, "spell").toString();
+        CompanionEntity npc = nearestNpc(player);
+        CompanionProfile profile = npc != null && npc.getProfileId() != null
+                ? ProfileManager.get().get(npc.getProfileId()) : null;
+        if (profile == null) {
+            ctx.getSource().sendFailure(Component.translatable("wh_npcs.msg.magic.no_npc"));
+            return 0;
+        }
+        profile.getMagicSpells().add(new CompanionProfile.MagicSpell(spellId, cat));
+        ProfileManager.get().save(profile);
+        ProfileSync.applyToLoadedEntities(ctx.getSource().getServer(), profile);
+        int size = profile.getMagicSpells().size();
+        ctx.getSource().sendSuccess(() -> Component.translatable(
+                "wh_npcs.msg.magic.loadout_add", spellId, cat, size), true);
+        return 1;
+    }
+
+    private static int magicLoadoutList(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        CompanionEntity npc = nearestNpc(player);
+        CompanionProfile profile = npc != null && npc.getProfileId() != null
+                ? ProfileManager.get().get(npc.getProfileId()) : null;
+        if (profile == null) {
+            ctx.getSource().sendFailure(Component.translatable("wh_npcs.msg.magic.no_npc"));
+            return 0;
+        }
+        if (profile.getMagicSpells().isEmpty()) {
+            ctx.getSource().sendSuccess(() -> Component.translatable("wh_npcs.msg.magic.loadout_empty"), false);
+            return 0;
+        }
+        int size = profile.getMagicSpells().size();
+        ctx.getSource().sendSuccess(() -> Component.translatable("wh_npcs.msg.magic.loadout_head", size), false);
+        for (CompanionProfile.MagicSpell ms : profile.getMagicSpells()) {
+            ctx.getSource().sendSuccess(() -> Component.literal(" • " + ms.category() + ": " + ms.id()), false);
+        }
+        return size;
+    }
+
+    private static int magicLoadoutClear(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        CompanionEntity npc = nearestNpc(player);
+        CompanionProfile profile = npc != null && npc.getProfileId() != null
+                ? ProfileManager.get().get(npc.getProfileId()) : null;
+        if (profile == null) {
+            ctx.getSource().sendFailure(Component.translatable("wh_npcs.msg.magic.no_npc"));
+            return 0;
+        }
+        int n = profile.getMagicSpells().size();
+        profile.getMagicSpells().clear();
+        ProfileManager.get().save(profile);
+        ProfileSync.applyToLoadedEntities(ctx.getSource().getServer(), profile);
+        ctx.getSource().sendSuccess(() -> Component.translatable("wh_npcs.msg.magic.loadout_clear", n), true);
+        return 1;
+    }
+
     private static int create(CommandContext<CommandSourceStack> ctx, String name) throws CommandSyntaxException {
         ServerPlayer player = ctx.getSource().getPlayerOrException();
         ServerLevel level = player.serverLevel();
@@ -233,6 +364,8 @@ public class WhcCommand {
         npc.setProfileId(profile.getId());
         npc.setCustomName(Component.literal(name));
         level.addFreshEntity(npc);
+        // Профиль применился в EntityJoinLevel — при свежем спавне добиваем HP до max профиля.
+        npc.setHealth(npc.getMaxHealth());
 
         ctx.getSource().sendSuccess(() -> Component.translatable(
                 "wh_npcs.msg.command.create_ok", name, shortId(profile.getId())), true);
@@ -319,6 +452,9 @@ public class WhcCommand {
                 ? ProfileSync.coloredName(cloneProfile)
                 : Component.literal(e.name()));
         level.addFreshEntity(npc);
+        // Профиль оригинала применился в EntityJoinLevel, но HP клона осталось дефолтным (20) —
+        // при свежем спавне добиваем до max профиля.
+        npc.setHealth(npc.getMaxHealth());
         ctx.getSource().sendSuccess(() -> Component.translatable(
                 "wh_npcs.msg.command.clone", e.name(),
                 (e.profileId() != null ? shortId(e.profileId()) : "—")), true);
@@ -639,6 +775,8 @@ public class WhcCommand {
         npc.setProfileId(profile.getId());
         npc.setCustomName(Component.literal(profile.getName()));
         level.addFreshEntity(npc);
+        // Профиль применился в EntityJoinLevel — при свежем спавне добиваем HP до max профиля.
+        npc.setHealth(npc.getMaxHealth());
 
         ctx.getSource().sendSuccess(() -> Component.translatable(
                 "wh_npcs.msg.command.import_ok", profile.getName(), shortId(profile.getId())), true);

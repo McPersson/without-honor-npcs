@@ -31,12 +31,20 @@ public class Faction {
 
     private final List<String> hostileTo;
 
+    /** false (деф.) — свои НЕ бьют своих (урон по своей фракции отменяется); true — разрешён. */
+    private final boolean friendlyFire;
+
     public Faction(String id, String name, int color, int killPenalty, List<Tier> tiers) {
-        this(id, name, color, killPenalty, tiers, List.of());
+        this(id, name, color, killPenalty, tiers, List.of(), false);
     }
 
     public Faction(String id, String name, int color, int killPenalty, List<Tier> tiers,
                    List<String> hostileTo) {
+        this(id, name, color, killPenalty, tiers, hostileTo, false);
+    }
+
+    public Faction(String id, String name, int color, int killPenalty, List<Tier> tiers,
+                   List<String> hostileTo, boolean friendlyFire) {
         this.id = id;
         this.name = name;
         this.color = color;
@@ -45,6 +53,12 @@ public class Faction {
         sorted.sort(Comparator.comparingInt(Tier::min));
         this.tiers = List.copyOf(sorted);
         this.hostileTo = List.copyOf(hostileTo);
+        this.friendlyFire = friendlyFire;
+    }
+
+    /** true — разрешён урон по своей фракции; false (деф.) — свои защищены. */
+    public boolean isFriendlyFire() {
+        return friendlyFire;
     }
 
     public String getId() {
@@ -112,7 +126,8 @@ public class Faction {
                 json.has("name") ? json.get("name").getAsString() : id,
                 json.has("color") ? parseColor(json.get("color").getAsString()) : 0xFF55FFFF,
                 json.has("kill_penalty") ? json.get("kill_penalty").getAsInt() : 0,
-                tiers, hostileTo);
+                tiers, hostileTo,
+                json.has("friendly_fire") && json.get("friendly_fire").getAsBoolean());
     }
 
     public JsonObject toJson() {
@@ -122,6 +137,9 @@ public class Faction {
         json.addProperty("color", formatColor(color));
         if (killPenalty != 0) {
             json.addProperty("kill_penalty", killPenalty);
+        }
+        if (friendlyFire) {
+            json.addProperty("friendly_fire", true);
         }
         if (!hostileTo.isEmpty()) {
             JsonArray hostile = new JsonArray();

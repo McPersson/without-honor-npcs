@@ -52,4 +52,5 @@ credit and a link to an official page), but you may **not** modify, fork, port t
 other versions/loaders, sell it, or reuse its code or assets without written
 permission. Viewing the source here is for transparency and bug reports.
 
-The **Alessia** mascot has additional terms in [ALESSIA_LICENSE.txt](ALESSIA_LICENSE.txt).
+The original characters (the **Alessia** mascot and **Ennie**) have additional
+terms in [CHARACTERS_LICENSE.txt](CHARACTERS_LICENSE.txt).

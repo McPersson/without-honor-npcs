@@ -45,6 +45,10 @@ public class PursueAttackerGoal extends Goal {
 
     @Override
     public boolean canUse() {
+        // #3: сцена смерти (эмоция перед смертью) — NPC заморожен, погоня не стартует.
+        if (npc.isDeathStaged()) {
+            return false;
+        }
         if (!npc.cfgPursueAttacker() || npc.cfgHoldPosition() || npc.getTarget() != null) {
             return false;
         }
@@ -58,6 +62,10 @@ public class PursueAttackerGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
+        // #3: сцена смерти началась посреди погони — немедленно останавливаемся.
+        if (npc.isDeathStaged()) {
+            return false;
+        }
         return npc.cfgPursueAttacker() && npc.getTarget() == null && active() != null;
     }
 

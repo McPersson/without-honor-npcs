@@ -42,10 +42,11 @@ interface (as that platform's Terms of Service may allow) does not grant any
 of the rights restricted above.
 
 ------------------------------------------------------------------------------
-3. MASCOT
+3. CHARACTERS
 ------------------------------------------------------------------------------
-The "Alessia" mascot and its texture are governed separately and additionally
-by ALESSIA_LICENSE.txt.
+The original characters of the Mod (including the "Alessia" mascot and
+"Ennie") and their textures are governed separately and additionally by
+CHARACTERS_LICENSE.txt.
 
 ------------------------------------------------------------------------------
 4. CONTRIBUTIONS

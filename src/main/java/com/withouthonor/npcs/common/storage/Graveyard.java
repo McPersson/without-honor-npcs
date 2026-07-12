@@ -16,11 +16,14 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.TicketType;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +33,11 @@ public class Graveyard extends SavedData {
 
     private static final String DATA_NAME = "wh_npcs_graveyard";
     private static final int MAX_ENTRIES = 64;
+
+    // Самоистекающий тикет (10 с) для асинхронной догрузки чанка респавна: раньше spawnAt делал
+    // синхронный getChunk на главном потоке — разовый фриз-спайк. Релиз не нужен — истекает сам.
+    private static final TicketType<ChunkPos> RESPAWN_TICKET =
+            TicketType.create("wh_npcs_respawn", Comparator.comparingLong(ChunkPos::toLong), 200);
 
     public record Entry(UUID profileId, String name, ResourceKey<Level> dim,
                         double x, double y, double z, float yaw,
@@ -90,6 +98,13 @@ public class Graveyard extends SavedData {
             CompanionProfile profile = ProfileManager.get().get(entry.profileId());
             Target target = respawnTarget(server, entry, profile);
             if (target == null) {
+                continue;
+            }
+            // Чанк не загружен → тикет и ждём следующего свипа (20 тиков); запись остаётся.
+            ChunkPos cp = new ChunkPos(SectionPos.blockToSectionCoord(target.x()),
+                    SectionPos.blockToSectionCoord(target.z()));
+            if (!target.level().hasChunk(cp.x, cp.z)) {
+                target.level().getChunkSource().addRegionTicket(RESPAWN_TICKET, cp, 1, cp);
                 continue;
             }
             entries.remove(i);

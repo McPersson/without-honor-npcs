@@ -38,6 +38,8 @@ public final class ActionTypes {
         register("attack_player", Actions.AttackPlayer::fromJson);
         register("edit_profile", Actions.EditProfile::fromJson);
         register("combat_stats", Actions.CombatStats::fromJson);
+        register("cast_spell", Actions.CastSpell::fromJson);
+        register("wait", Actions.Wait::fromJson);
     }
 
     private ActionTypes() {

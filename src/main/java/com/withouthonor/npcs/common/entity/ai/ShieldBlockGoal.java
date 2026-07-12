@@ -4,7 +4,6 @@ import com.withouthonor.npcs.common.entity.CompanionEntity;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.item.Items;
 
 import javax.annotation.Nullable;
 import java.util.EnumSet;
@@ -28,10 +27,12 @@ public class ShieldBlockGoal extends Goal {
 
     @Nullable
     private InteractionHand shieldHand() {
-        if (npc.getOffhandItem().is(Items.SHIELD)) {
+        // Forge-стандарт: любой предмет, умеющий блокировать (ваниль-щит реализует SHIELD_BLOCK) —
+        // модовые щиты работают тоже. armPose увидит их сам через UseAnim.BLOCK.
+        if (npc.getOffhandItem().canPerformAction(net.minecraftforge.common.ToolActions.SHIELD_BLOCK)) {
             return InteractionHand.OFF_HAND;
         }
-        if (npc.getMainHandItem().is(Items.SHIELD)) {
+        if (npc.getMainHandItem().canPerformAction(net.minecraftforge.common.ToolActions.SHIELD_BLOCK)) {
             return InteractionHand.MAIN_HAND;
         }
         return null;

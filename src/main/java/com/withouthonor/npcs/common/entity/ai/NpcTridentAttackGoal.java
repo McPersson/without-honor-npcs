@@ -10,8 +10,6 @@ import java.util.EnumSet;
 
 public class NpcTridentAttackGoal extends Goal {
 
-    private static final int WIND_UP = 12;
-
     private final CompanionEntity mob;
     private final double speedModifier;
     private final int attackIntervalMin;
@@ -32,21 +30,30 @@ public class NpcTridentAttackGoal extends Goal {
 
     @Override
     public boolean canUse() {
-        return this.mob.getTarget() != null && isHoldingTrident();
+        return this.mob.getTarget() != null && isHoldingSpear();
     }
 
-    private boolean isHoldingTrident() {
-        return this.mob.isHolding(is -> is.getItem() instanceof TridentItem);
+    /**
+     * Держит метаемое копьё (ваниль или модовое), у которого метание НЕ помечено провалившимся.
+     * ТОЛЬКО главная рука: performRangedAttack читает MAINHAND, off-hand дал бы замах
+     * с «выстрелом стрелой из ничего»; гейт совпадает с rebuildCombatGoals.
+     */
+    private boolean isHoldingSpear() {
+        return this.mob.canThrowSpear(this.mob.getMainHandItem());
     }
 
-    private InteractionHand tridentHand() {
-        return this.mob.getMainHandItem().getItem() instanceof TridentItem
-                ? InteractionHand.MAIN_HAND : InteractionHand.OFF_HAND;
+    private InteractionHand spearHand() {
+        return InteractionHand.MAIN_HAND; // см. isHoldingSpear — off-hand не поддерживается
+    }
+
+    /** Ваниль-трезубец бросаем быстрее; модовым копьям даём больше заряда (порог releaseUsing мода). */
+    private int windUp() {
+        return this.mob.getItemInHand(spearHand()).getItem() instanceof TridentItem ? 12 : 20;
     }
 
     @Override
     public boolean canContinueToUse() {
-        return (canUse() || !this.mob.getNavigation().isDone()) && isHoldingTrident();
+        return (canUse() || !this.mob.getNavigation().isDone()) && isHoldingSpear();
     }
 
     @Override
@@ -123,13 +130,13 @@ public class NpcTridentAttackGoal extends Goal {
         if (this.mob.isUsingItem()) {
             if (!canSee && this.seeTime < -60) {
                 this.mob.stopUsingItem();
-            } else if (canSee && this.mob.getTicksUsingItem() >= WIND_UP) {
+            } else if (canSee && this.mob.getTicksUsingItem() >= windUp()) {
                 this.mob.stopUsingItem();
                 this.mob.performRangedAttack(target, 1.0F);
                 this.attackTime = this.attackIntervalMin;
             }
         } else if (--this.attackTime <= 0 && this.seeTime >= -60) {
-            this.mob.startUsingItem(tridentHand());
+            this.mob.startUsingItem(spearHand());
         }
     }
 }

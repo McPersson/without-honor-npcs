@@ -119,6 +119,15 @@ public final class CuriosPackets {
                             bridge.setCurio(npc, e.slotType(), e.index(), e.stack());
                         }
                     }
+                    // Пересобираем боевые цели: спеллбук в слоте "spellbook" пополняет пул мага
+                    // (buildMageGoal) — книга должна заработать сразу, как в SaveEquipmentPacket.
+                    if (npc.getProfileId() != null) {
+                        var profile = com.withouthonor.npcs.common.storage.ProfileManager.get()
+                                .get(npc.getProfileId());
+                        if (profile != null) {
+                            npc.applyCombatProfile(profile);
+                        }
+                    }
                 }
             }
             ctx.get().setPacketHandled(true);

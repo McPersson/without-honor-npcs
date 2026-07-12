@@ -48,6 +48,14 @@ public class AutoFollowGoal extends Goal {
 
     @Override
     public boolean canUse() {
+        // #3: сцена смерти (эмоция перед смертью) — NPC заморожен, авто-следование не стартует.
+        if (npc.isDeathStaged()) {
+            return false;
+        }
+        // В бою авто-следование уступает боевой цели (второй follow-путь, [[feedback_two_follow_goals]]).
+        if (npc.getTarget() != null && npc.getTarget().isAlive()) {
+            return false;
+        }
         if (npc.getFollowMode() != FollowMode.NONE || npc.isPassenger()) {
             return false;
         }
@@ -61,6 +69,13 @@ public class AutoFollowGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
+        // #3: сцена смерти началась посреди следования — немедленно останавливаемся.
+        if (npc.isDeathStaged()) {
+            return false;
+        }
+        if (npc.getTarget() != null && npc.getTarget().isAlive()) {
+            return false;
+        }
         if (npc.getFollowMode() != FollowMode.NONE || npc.isPassenger()) {
             return false;
         }
@@ -103,7 +118,20 @@ public class AutoFollowGoal extends Goal {
                     && tryTeleportNearTarget()) {
                 return;
             }
-            navigation.moveTo(target, speedFor(distSqr));
+            moveToWithSpacing(speedFor(distSqr));
+        }
+    }
+
+    // «Не толпиться»: персональная точка на кольце вокруг цели (как в FollowPlayerGoal.moveToWithSpacing).
+    // Угол от entity-id → работает и между NPC с разными целями следования (ручное/авто).
+    private void moveToWithSpacing(double speed) {
+        if (npc.cfgGroupSpacing()) {
+            double ang = (npc.getId() % 8) / 8.0 * Math.PI * 2.0;
+            double r = 1.3D;
+            navigation.moveTo(target.getX() + Math.cos(ang) * r, target.getY(),
+                    target.getZ() + Math.sin(ang) * r, speed);
+        } else {
+            navigation.moveTo(target, speed);
         }
     }
 

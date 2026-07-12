@@ -60,17 +60,21 @@ public class CombatPresetScreen extends ScaledScreen {
 
     @Override
     protected int designH() {
-        return 306;
+        return 360;
     }
+
+    /** Резерв под описание пресета — под самое длинное (Стрелок, 4 строки), чтобы блок опций
+     *  не «прыгал» при переключении пресетов (стабильная сетка). */
+    private static final int DESC_RESERVE = 4 * 10 + 8;
 
     private void recalc() {
         winW = 360;
-        winH = 306;
+        winH = 360;
         winX = (width - winW) / 2;
         winY = (height - winH) / 2;
         listTop = winY + HEADER_H + 8;
         descTop = listTop + NpcEditorScreen.PRESET_IDS.length * ROW_H + 8;
-        optTop = descTop + Math.max(38, descLines(presetIdx()).length * 10 + 6);
+        optTop = descTop + DESC_RESERVE;
         bottomY = winY + winH - PAD - 20;
     }
 
@@ -195,6 +199,8 @@ public class CombatPresetScreen extends ScaledScreen {
             g.drawString(font, "§7" + desc[line], winX + PAD, descTop + line * 10, VanillaUIHelper.TEXT_WHITE, false);
         }
 
+        // Разделитель между фиксированной полосой описания и блоком опций (визуальный ритм сетки).
+        g.fill(winX + 6, optTop - 6, winX + winW - 6, optTop - 5, 0xFF373737);
         String tooltip = renderOptions(g, NpcEditorScreen.PRESET_IDS[idx], mouseX, mouseY);
         if (tooltip == null) {
             tooltip = boxTip(intervalBox, intervalTipKey, mouseX, mouseY);
@@ -209,6 +215,19 @@ public class CombatPresetScreen extends ScaledScreen {
             tooltip = boxTip(leapBox, leapTipKey, mouseX, mouseY);
         }
 
+        // Провокация/дружественный огонь — общий блок для всех боевых пресетов, в отдельном экране.
+        // При мирном пресете кнопка не прячется, а серится (клик тоже заблокирован — симметрично).
+        boolean provokeActive = !"passive".equals(NpcEditorScreen.PRESET_IDS[idx]);
+        boolean provokeHover = isOver(mouseX, mouseY, winX + PAD, bottomY, 110, 18);
+        VanillaUIHelper.drawSmallButton(g, font,
+                Component.translatable("wh_npcs.ui.combat_preset.provoke_btn").getString(),
+                winX + PAD, bottomY, 110, provokeActive && provokeHover,
+                provokeActive ? VanillaUIHelper.TEXT_AQUA : VanillaUIHelper.TEXT_DARK_GRAY);
+        if (provokeHover) {
+            tooltip = Component.translatable(provokeActive
+                    ? "wh_npcs.ui.combat_preset.provoke_btn_tip"
+                    : "wh_npcs.ui.combat_preset.provoke_btn_passive_tip").getString();
+        }
         drawBtn(g, Component.translatable("wh_npcs.ui.common.done").getString(), winX + winW - PAD - 80, bottomY, 80, mouseX, mouseY, VanillaUIHelper.TEXT_GREEN);
         hoverTooltip = tooltip;
     }
@@ -339,6 +358,13 @@ public class CombatPresetScreen extends ScaledScreen {
                     }
                     return true;
                 }
+            }
+            // Кнопка «Провокация…» рисуется всегда; при мирном пресете клик глотаем (кнопка серая).
+            if (isOver(mouseX, mouseY, winX + PAD, bottomY, 110, 18)) {
+                if (!"passive".equals(preset) && minecraft != null) {
+                    minecraft.setScreen(new ProvocationScreen(this, profileJson));
+                }
+                return true;
             }
             if (isOver(mouseX, mouseY, winX + winW - PAD - 80, bottomY, 80, 18)) {
                 onClose();

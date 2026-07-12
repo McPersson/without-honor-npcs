@@ -34,6 +34,11 @@ public class GlobalScheduleManager extends SavedData {
     private static final TicketType<ChunkPos> LOAD_TICKET =
             TicketType.create("wh_npcs_global", Comparator.comparingLong(ChunkPos::toLong));
 
+    // Источнику нужна догрузка САМОЙ сущности (спайк: дистанции 1 не хватает), цели — только
+    // блоки/персист (дистанция 1 — как ваниль POST_TELEPORT). Дистанции add/remove обязаны совпадать.
+    private static final int SRC_TICKET_DIST = 2;
+    private static final int DST_TICKET_DIST = 1;
+
     private static final class Rec {
         UUID profileId;
         ResourceKey<Level> dim;
@@ -149,8 +154,8 @@ public class GlobalScheduleManager extends SavedData {
                 }
                 ChunkPos src = new ChunkPos(r.lastPos);
                 ChunkPos dst = new ChunkPos(target);
-                level.getChunkSource().addRegionTicket(LOAD_TICKET, src, 2, src);
-                level.getChunkSource().addRegionTicket(LOAD_TICKET, dst, 2, dst);
+                level.getChunkSource().addRegionTicket(LOAD_TICKET, src, SRC_TICKET_DIST, src);
+                level.getChunkSource().addRegionTicket(LOAD_TICKET, dst, DST_TICKET_DIST, dst);
                 Pending p = new Pending();
                 p.target = target;
                 p.src = src;
@@ -187,7 +192,9 @@ public class GlobalScheduleManager extends SavedData {
             }
             CompanionEntity npc = loadedNpc(level, uuid);
             if (npc != null) {
-                releaseTickets(level, p);
+                // Тикеты ставились на уровне p.dim (мог отличаться от текущего r.dim после смены
+                // измерения NPC) — релизить строго через server-перегрузку, иначе утечка force-чанков.
+                releaseTickets(server, p);
                 relocate(npc, p.target);
                 r.lastPos = p.target;
                 CompanionProfile profile = ProfileManager.get().get(r.profileId);
@@ -200,7 +207,7 @@ public class GlobalScheduleManager extends SavedData {
                 it.remove();
             } else if (now > p.deadline) {
                 WHCompanions.LOGGER.warn("Global schedule: NPC {} not found to relocate (gone?), dropping", uuid);
-                releaseTickets(level, p);
+                releaseTickets(server, p); // по p.dim, не по текущему r.dim (см. выше)
                 records.remove(uuid);
                 setDirty();
                 it.remove();
@@ -215,10 +222,10 @@ public class GlobalScheduleManager extends SavedData {
 
     private static void releaseTickets(ServerLevel level, Pending p) {
         if (p.src != null) {
-            level.getChunkSource().removeRegionTicket(LOAD_TICKET, p.src, 2, p.src);
+            level.getChunkSource().removeRegionTicket(LOAD_TICKET, p.src, SRC_TICKET_DIST, p.src);
         }
         if (p.dst != null) {
-            level.getChunkSource().removeRegionTicket(LOAD_TICKET, p.dst, 2, p.dst);
+            level.getChunkSource().removeRegionTicket(LOAD_TICKET, p.dst, DST_TICKET_DIST, p.dst);
         }
     }
 
@@ -226,6 +233,8 @@ public class GlobalScheduleManager extends SavedData {
         ServerLevel level = p.dim != null ? server.getLevel(p.dim) : null;
         if (level != null) {
             releaseTickets(level, p);
+        } else {
+            WHCompanions.LOGGER.warn("Global schedule: dimension {} gone, chunk tickets not released", p.dim);
         }
     }
 

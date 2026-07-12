@@ -28,6 +28,13 @@ public final class ClientCacheCleanup {
                         instanceof com.withouthonor.npcs.compat.emotecraft.EmotecraftBridgeImpl emote) {
             emote.onEntityUnload(id);
         }
+        if (com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()) {
+            com.withouthonor.npcs.compat.IronsSpellsClientBridge iss =
+                    com.withouthonor.npcs.compat.Compat.ironsSpellsClient();
+            if (iss != null) {
+                iss.onEntityUnload(id);
+            }
+        }
     }
 
     @SubscribeEvent
@@ -41,6 +48,13 @@ public final class ClientCacheCleanup {
                     && com.withouthonor.npcs.compat.Compat.emotecraft()
                             instanceof com.withouthonor.npcs.compat.emotecraft.EmotecraftBridgeImpl emote) {
                 emote.clearLayers();
+            }
+            if (com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()) {
+                com.withouthonor.npcs.compat.IronsSpellsClientBridge iss =
+                        com.withouthonor.npcs.compat.Compat.ironsSpellsClient();
+                if (iss != null) {
+                    iss.clearLayers();
+                }
             }
         }
     }

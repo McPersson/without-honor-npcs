@@ -284,12 +284,18 @@ public class SkinLibraryScreen extends ScaledScreen {
 
     @Nullable
     private String renderDefaultsTab(GuiGraphics g, int mouseX, int mouseY) {
+        List<DefaultSkins.DefaultSkin> all = DefaultSkins.ALL;
+        int visible = (listH - 8) / ROW_H;
+        scroll = Math.max(0, Math.min(scroll, Math.max(0, all.size() - visible)));
         int y = listY + 4;
-        for (DefaultSkins.DefaultSkin skin : DefaultSkins.ALL) {
+        for (int i = scroll; i < Math.min(all.size(), scroll + visible); i++) {
+            DefaultSkins.DefaultSkin skin = all.get(i);
             skinRow(g, mouseX, mouseY, y, skin.spec(),
                     skin.displayName(), skin.slim() ? "slim" : "wide", true);
             y += ROW_H;
         }
+        VanillaUIHelper.drawScrollbar(g, listX + LIST_W - 6, listY + 3, listH - 6,
+                all.size(), visible, scroll, scrollbars, v -> scroll = v);
         return null;
     }
 
@@ -859,8 +865,11 @@ public class SkinLibraryScreen extends ScaledScreen {
 
     private boolean handleListClick(double mouseX, double mouseY) {
         if (tab == 0) {
+            List<DefaultSkins.DefaultSkin> all = DefaultSkins.ALL;
+            int visible = (listH - 8) / ROW_H;
             int y = listY + 4;
-            for (DefaultSkins.DefaultSkin skin : DefaultSkins.ALL) {
+            for (int i = scroll; i < Math.min(all.size(), scroll + visible); i++) {
+                DefaultSkins.DefaultSkin skin = all.get(i);
                 if (isOver(mouseX, mouseY, listX + 2, y, LIST_W - 4, ROW_H)) {
                     if (isOver(mouseX, mouseY, listX + LIST_W - 18, y + 6, 10, 9)) {
                         ClientPrefs.get().toggleFavoriteSkin(skin.spec());

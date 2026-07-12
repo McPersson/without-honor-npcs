@@ -52,6 +52,16 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
         if (com.withouthonor.npcs.compat.Compat.curiosLoaded()) {
             this.addLayer(new com.withouthonor.npcs.compat.curios.CuriosNpcLayer(this));
         }
+
+        // Слои каста Iron's Spells (заряд копья/стрелы в руке, свечение глаз); мост уже
+        // гейтит ISS + Dist.CLIENT, ISS-классы слоёв линкует только Impl
+        com.withouthonor.npcs.compat.IronsSpellsClientBridge issCast =
+                com.withouthonor.npcs.compat.Compat.ironsSpellsClient();
+        if (issCast != null) {
+            for (var layer : issCast.createRenderLayers(this)) {
+                this.addLayer(layer);
+            }
+        }
     }
 
     private final Map<CompanionEntity, Entity> disguiseDelegates = new WeakHashMap<>();
@@ -68,6 +78,8 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
             Entity delegate = delegateFor(entity, disguise);
             if (delegate != null) {
                 renderDisguised(entity, delegate, entityYaw, partialTicks, poseStack, buffer, packedLight);
+                // Каст идёт и под маскировкой — луч рисуем от NPC поверх делегата
+                renderCastFx(entity, poseStack, buffer, partialTicks);
                 return;
             }
         }
@@ -84,9 +96,27 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
             poseStack.pushPose();
             poseStack.translate(t.posX(), dy, t.posZ());
             super.render(entity, entityYaw, partialTicks, poseStack, buffer, packedLight);
+            // Внутри трансформа: исток луча должен совпадать со смещённой моделью
+            renderCastFx(entity, poseStack, buffer, partialTicks);
             poseStack.popPose();
         } else {
             super.render(entity, entityYaw, partialTicks, poseStack, buffer, packedLight);
+            renderCastFx(entity, poseStack, buffer, partialTicks);
+        }
+    }
+
+    /**
+     * Мировой визуал каста ISS (луч ray of siphoning и т.п.) — у мобов ISS он идёт из их
+     * рендерера, у игроков из RenderLivingEvent.Post c фильтром instanceof Player; наш NPC
+     * мимо обоих путей, поэтому зовём мост сами после super.render во всех ветках.
+     * Внутри Impl ранний выход при !isCasting — дополнительный гейт не нужен.
+     */
+    private static void renderCastFx(CompanionEntity entity, PoseStack poseStack,
+                                     MultiBufferSource buffer, float partialTicks) {
+        com.withouthonor.npcs.compat.IronsSpellsClientBridge cast =
+                com.withouthonor.npcs.compat.Compat.ironsSpellsClient();
+        if (cast != null) {
+            cast.renderCastFx(entity, poseStack, buffer, partialTicks);
         }
     }
 
@@ -147,10 +177,20 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
             }
         }
 
-        com.withouthonor.npcs.compat.EmotecraftClientBridge emote =
-                com.withouthonor.npcs.compat.Compat.emotecraftClient();
-        if (emote != null) {
-            emote.applyBodyTransform(entity, poseStack, partialTicks);
+        // Сначала выясняем каст: на костях он перекрывает эмоцию, поэтому и root-трансформ
+        // эмоции при активном касте пропускаем — иначе наклоны корпуса складываются
+        boolean castApplied = false;
+        com.withouthonor.npcs.compat.IronsSpellsClientBridge cast =
+                com.withouthonor.npcs.compat.Compat.ironsSpellsClient();
+        if (cast != null) {
+            castApplied = cast.applyCastBody(entity, poseStack, partialTicks);
+        }
+        if (!castApplied) {
+            com.withouthonor.npcs.compat.EmotecraftClientBridge emote =
+                    com.withouthonor.npcs.compat.Compat.emotecraftClient();
+            if (emote != null) {
+                emote.applyBodyTransform(entity, poseStack, partialTicks);
+            }
         }
     }
 

@@ -21,6 +21,9 @@ public final class DefaultSkins {
     }
 
     public static final List<DefaultSkin> ALL = List.of(
+            new DefaultSkin("alessia", "Alessia", true),
+            new DefaultSkin("ennie", "Ennie", true),
+
             new DefaultSkin("steve", "Steve", false),
             new DefaultSkin("alex", "Alex", true),
             new DefaultSkin("noor", "Noor", true),
@@ -29,11 +32,9 @@ public final class DefaultSkins {
             new DefaultSkin("zuri", "Zuri", false),
             new DefaultSkin("makena", "Makena", true),
             new DefaultSkin("kai", "Kai", false),
-            new DefaultSkin("efe", "Efe", true),
+            new DefaultSkin("efe", "Efe", true));
 
-            new DefaultSkin("alessia", "Alessia", true));
-
-    private static final java.util.Set<String> BUNDLED = java.util.Set.of("alessia");
+    private static final java.util.Set<String> BUNDLED = java.util.Set.of("alessia", "ennie");
 
     public static String bundledResourcePath(String id) {
         return "/assets/wh_npcs/textures/entity/companion/" + id + ".png";

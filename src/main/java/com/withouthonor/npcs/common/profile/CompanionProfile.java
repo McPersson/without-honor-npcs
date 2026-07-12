@@ -4,11 +4,14 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import com.withouthonor.npcs.WHCompanions;
 import com.withouthonor.npcs.common.dialogue.EntryPoint;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public class CompanionProfile {
@@ -60,6 +63,36 @@ public class CompanionProfile {
             JsonObject json = new JsonObject();
             json.add("item", item.toJson());
             json.addProperty("chance", chancePercent);
+            return json;
+        }
+    }
+
+    /** Спелл в лоадауте мага: id ISS-спелла + категория (attack/defense/movement/support)
+     *  + вес 1..3 — как часто ИИ выбирает спелл (кладём в пул Wizard*Goal weight раз:
+     *  дубликаты в списке — родной механизм веса ISS, так настроен их Priest).
+     *  Уровень каста родная WizardAttackGoal выбирает сама из «разброса силы» профиля. */
+    public record MagicSpell(String id, String category, int weight) {
+
+        /** Прежний 2-арг конструктор — вес по умолчанию 1 (команды/старый код). */
+        public MagicSpell(String id, String category) {
+            this(id, category, 1);
+        }
+
+        public static MagicSpell fromJson(JsonObject json) {
+            return new MagicSpell(
+                    json.get("id").getAsString(),
+                    json.has("category") ? json.get("category").getAsString() : "attack",
+                    // Кламп 1..3 — те же границы, что даёт UI (MagicLoadoutScreen, «×N»)
+                    json.has("weight") ? Math.max(1, Math.min(3, json.get("weight").getAsInt())) : 1);
+        }
+
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("id", id);
+            json.addProperty("category", category);
+            if (weight != 1) {
+                json.addProperty("weight", weight); // дефолтный вес 1 в JSON не пишем
+            }
             return json;
         }
     }
@@ -154,6 +187,23 @@ public class CompanionProfile {
 
     private float leapStrength = 0.4F;
 
+    // --- Магия (Iron's Spells, пресет «Маг»); секция optional, старые профили нетронуты ---
+    // Дефолты интервалов/качества вынесены в константы: toJson по ним решает, писать ли секцию magic.
+    private static final float MAGIC_MIN_INTERVAL_DEFAULT = 1.5F;
+    private static final float MAGIC_MAX_INTERVAL_DEFAULT = 4.0F;
+    private static final float MAGIC_MIN_QUALITY_DEFAULT = 0.3F;
+    private static final float MAGIC_MAX_QUALITY_DEFAULT = 0.7F;
+    private final List<MagicSpell> magicSpells = new ArrayList<>();
+    private float magicMinInterval = MAGIC_MIN_INTERVAL_DEFAULT;  // сек между кастами (нижняя граница)
+    private float magicMaxInterval = MAGIC_MAX_INTERVAL_DEFAULT;  // сек между кастами (верхняя граница)
+    // «разброс силы» → уровень каста (WizardAttackGoal.setSpellQuality)
+    private float magicMinQuality = MAGIC_MIN_QUALITY_DEFAULT;
+    private float magicMaxQuality = MAGIC_MAX_QUALITY_DEFAULT;
+    private boolean magicFlee;                  // отступать при сближении (WizardAttackGoal.setAllowFleeing)
+    private boolean magicSpellsFromWeapon;      // добавлять imbued-спеллы с держимого предмета
+    /** id атрибута ISS → базовое значение (нейтраль 1.0, в профиле только отличия от неё). */
+    private final Map<String, Double> magicAttrs = new LinkedHashMap<>();
+
     private float regenPerSecond;
 
     private boolean followTeleport = true;
@@ -194,7 +244,17 @@ public class CompanionProfile {
 
     private boolean pursueAttacker = true;
 
+    // Провокация: терпимость к случайным ударам ИГРОКОВ до порога (удары ИЛИ % HP в окне)
+    private boolean provokeEnabled = true;
+    private int provokeHits = 3;          // агр после N ударов
+    private int provokeHpPct = 15;        // агр, если снято ≥X% max HP в окне (0 = выкл)
+    private int provokeWindowSec = 10;    // окно накопления счётчиков
+    private boolean provokeIgnoreEscort = true; // удары сопровождаемого НИКОГДА не агрят
+    private int forgiveAfterSec = 20;     // цель-игрок не бил N сек → прощаем (0 = не прощать)
+    private boolean escortNoHarmOwner = true; // #6: напарник не ранит сопровождаемого игрока
+
     private boolean holdPosition;
+    private boolean supportAllies; // маг-поддержка лечит/бафает союзников (фракция + хозяин), не только себя
 
     private boolean avoidSun;
 
@@ -215,6 +275,12 @@ public class CompanionProfile {
     private String idleEmoteId = "";
     private String idleEmoteName = "";
     private String idleEmoteAuthor = "";
+
+    // #3: эмоция перед смертью — инсценировка (NPC играет эмоцию, потом умирает)
+    private String deathEmoteId = "";
+    private String deathEmoteName = "";
+    private String deathEmoteAuthor = "";
+    private float deathEmoteSecs = 3.0F;
 
     private String mobType = "undefined";
 
@@ -622,6 +688,57 @@ public class CompanionProfile {
         return drops;
     }
 
+    public List<MagicSpell> getMagicSpells() {
+        return magicSpells;
+    }
+
+    /** Базовое значение атрибута ISS; 1.0 — нейтраль, если в профиле ничего не задано. */
+    public double getMagicAttr(String attributeId) {
+        return magicAttrs.getOrDefault(attributeId, 1.0D);
+    }
+
+    public float getMagicMinInterval() {
+        return magicMinInterval;
+    }
+
+    public float getMagicMaxInterval() {
+        return magicMaxInterval;
+    }
+
+    public void setMagicInterval(float min, float max) {
+        this.magicMinInterval = min;
+        this.magicMaxInterval = max;
+    }
+
+    public float getMagicMinQuality() {
+        return magicMinQuality;
+    }
+
+    public float getMagicMaxQuality() {
+        return magicMaxQuality;
+    }
+
+    public void setMagicQuality(float min, float max) {
+        this.magicMinQuality = min;
+        this.magicMaxQuality = max;
+    }
+
+    public boolean isMagicFlee() {
+        return magicFlee;
+    }
+
+    public void setMagicFlee(boolean v) {
+        this.magicFlee = v;
+    }
+
+    public boolean isMagicSpellsFromWeapon() {
+        return magicSpellsFromWeapon;
+    }
+
+    public void setMagicSpellsFromWeapon(boolean v) {
+        this.magicSpellsFromWeapon = v;
+    }
+
     public boolean isBubblesEnabled() {
         return bubblesEnabled;
     }
@@ -859,8 +976,72 @@ public class CompanionProfile {
         return pursueAttacker;
     }
 
+    public boolean isProvokeEnabled() {
+        return provokeEnabled;
+    }
+
+    public void setProvokeEnabled(boolean v) {
+        this.provokeEnabled = v;
+    }
+
+    public int getProvokeHits() {
+        return provokeHits;
+    }
+
+    public void setProvokeHits(int v) {
+        this.provokeHits = Math.max(1, Math.min(10, v));
+    }
+
+    public int getProvokeHpPct() {
+        return provokeHpPct;
+    }
+
+    public void setProvokeHpPct(int v) {
+        this.provokeHpPct = Math.max(0, Math.min(100, v));
+    }
+
+    public int getProvokeWindowSec() {
+        return provokeWindowSec;
+    }
+
+    public void setProvokeWindowSec(int v) {
+        this.provokeWindowSec = Math.max(5, Math.min(60, v));
+    }
+
+    public boolean isProvokeIgnoreEscort() {
+        return provokeIgnoreEscort;
+    }
+
+    public void setProvokeIgnoreEscort(boolean v) {
+        this.provokeIgnoreEscort = v;
+    }
+
+    public int getForgiveAfterSec() {
+        return forgiveAfterSec;
+    }
+
+    public void setForgiveAfterSec(int v) {
+        this.forgiveAfterSec = Math.max(0, Math.min(120, v));
+    }
+
+    public boolean isEscortNoHarmOwner() {
+        return escortNoHarmOwner;
+    }
+
+    public void setEscortNoHarmOwner(boolean v) {
+        this.escortNoHarmOwner = v;
+    }
+
     public boolean isHoldPosition() {
         return holdPosition;
+    }
+
+    public boolean isSupportAllies() {
+        return supportAllies;
+    }
+
+    public void setSupportAllies(boolean v) {
+        this.supportAllies = v;
     }
 
     public boolean isAvoidSun() {
@@ -905,6 +1086,32 @@ public class CompanionProfile {
 
     public String getIdleEmoteAuthor() {
         return idleEmoteAuthor;
+    }
+
+    public String getDeathEmoteId() {
+        return deathEmoteId;
+    }
+
+    public String getDeathEmoteName() {
+        return deathEmoteName;
+    }
+
+    public String getDeathEmoteAuthor() {
+        return deathEmoteAuthor;
+    }
+
+    public void setDeathEmote(String id, String name, String author) {
+        this.deathEmoteId = id;
+        this.deathEmoteName = name;
+        this.deathEmoteAuthor = author;
+    }
+
+    public float getDeathEmoteSecs() {
+        return deathEmoteSecs;
+    }
+
+    public void setDeathEmoteSecs(float v) {
+        this.deathEmoteSecs = Math.max(0.5F, Math.min(10.0F, v));
     }
 
     public String getMobType() {
@@ -1105,7 +1312,7 @@ public class CompanionProfile {
                 cats.add("monsters");
                 cats.add("factions");
             }
-            case "melee", "bow", "potion", "shield" -> style = rawPreset;
+            case "melee", "bow", "potion", "shield", "mage" -> style = rawPreset;
             default -> style = "passive";
         }
         profile.combatPreset = style;
@@ -1258,7 +1465,25 @@ public class CompanionProfile {
         }
         profile.boatRide = !json.has("boat_ride") || json.get("boat_ride").getAsBoolean();
         profile.pursueAttacker = !json.has("pursue_attacker") || json.get("pursue_attacker").getAsBoolean();
+        profile.provokeEnabled = !json.has("provoke_enabled") || json.get("provoke_enabled").getAsBoolean();
+        if (json.has("provoke_hits")) {
+            profile.setProvokeHits(json.get("provoke_hits").getAsInt());
+        }
+        if (json.has("provoke_hp_pct")) {
+            profile.setProvokeHpPct(json.get("provoke_hp_pct").getAsInt());
+        }
+        if (json.has("provoke_window_s")) {
+            profile.setProvokeWindowSec(json.get("provoke_window_s").getAsInt());
+        }
+        profile.provokeIgnoreEscort =
+                !json.has("provoke_ignore_escort") || json.get("provoke_ignore_escort").getAsBoolean();
+        if (json.has("forgive_after_s")) {
+            profile.setForgiveAfterSec(json.get("forgive_after_s").getAsInt());
+        }
+        profile.escortNoHarmOwner =
+                !json.has("escort_no_harm_owner") || json.get("escort_no_harm_owner").getAsBoolean();
         profile.holdPosition = json.has("hold_position") && json.get("hold_position").getAsBoolean();
+        profile.supportAllies = json.has("support_allies") && json.get("support_allies").getAsBoolean();
         profile.idleWander = json.has("idle_wander") && json.get("idle_wander").getAsBoolean();
         if (json.has("idle_wander_radius")) {
             profile.idleWanderRadius = json.get("idle_wander_radius").getAsInt();
@@ -1281,6 +1506,14 @@ public class CompanionProfile {
             profile.idleEmoteId = json.get("idle_emote").getAsString();
             profile.idleEmoteName = json.has("idle_emote_name") ? json.get("idle_emote_name").getAsString() : "";
             profile.idleEmoteAuthor = json.has("idle_emote_author") ? json.get("idle_emote_author").getAsString() : "";
+        }
+        if (json.has("death_emote")) {
+            profile.deathEmoteId = json.get("death_emote").getAsString();
+            profile.deathEmoteName = json.has("death_emote_name") ? json.get("death_emote_name").getAsString() : "";
+            profile.deathEmoteAuthor = json.has("death_emote_author") ? json.get("death_emote_author").getAsString() : "";
+        }
+        if (json.has("death_emote_secs")) {
+            profile.setDeathEmoteSecs(json.get("death_emote_secs").getAsFloat());
         }
         if (json.has("mob_type")) {
             profile.mobType = json.get("mob_type").getAsString();
@@ -1326,6 +1559,61 @@ public class CompanionProfile {
         }
         if (json.has("auto_follow_target")) {
             profile.autoFollowTarget = json.get("auto_follow_target").getAsString();
+        }
+        if (json.has("magic")) {
+            JsonObject magic = json.getAsJsonObject("magic");
+            // Клампы — те же границы, что даёт UI (MagicLoadoutScreen: интервал 0.2–20 с, качество 0–1);
+            // защита от кривого JSON из импорта/экспорта.
+            if (magic.has("min_interval")) {
+                profile.magicMinInterval = Math.max(0.2F, Math.min(20.0F, magic.get("min_interval").getAsFloat()));
+            }
+            if (magic.has("max_interval")) {
+                profile.magicMaxInterval = Math.max(0.2F, Math.min(20.0F, magic.get("max_interval").getAsFloat()));
+            }
+            if (profile.magicMinInterval > profile.magicMaxInterval) {
+                float t = profile.magicMinInterval;
+                profile.magicMinInterval = profile.magicMaxInterval;
+                profile.magicMaxInterval = t;
+            }
+            if (magic.has("min_quality")) {
+                profile.magicMinQuality = Math.max(0.0F, Math.min(1.0F, magic.get("min_quality").getAsFloat()));
+            }
+            if (magic.has("max_quality")) {
+                profile.magicMaxQuality = Math.max(0.0F, Math.min(1.0F, magic.get("max_quality").getAsFloat()));
+            }
+            if (profile.magicMinQuality > profile.magicMaxQuality) {
+                float t = profile.magicMinQuality;
+                profile.magicMinQuality = profile.magicMaxQuality;
+                profile.magicMaxQuality = t;
+            }
+            profile.magicFlee = magic.has("flee") && magic.get("flee").getAsBoolean();
+            profile.magicSpellsFromWeapon =
+                    magic.has("spells_from_weapon") && magic.get("spells_from_weapon").getAsBoolean();
+            if (magic.has("attrs")) {
+                // Атрибуты храним по строковому id; резолв — только при применении (план §3.1).
+                for (Map.Entry<String, JsonElement> e : magic.getAsJsonObject("attrs").entrySet()) {
+                    double v = e.getValue().getAsDouble();
+                    if (!Double.isFinite(v)) {
+                        WHCompanions.LOGGER.warn("Profile magic attr '{}': non-finite value, skipped", e.getKey());
+                        continue;
+                    }
+                    // UI даёт −100..+100% → множитель 0..2.
+                    profile.magicAttrs.put(e.getKey(), Math.max(0.0D, Math.min(2.0D, v)));
+                }
+            }
+            if (magic.has("spells")) {
+                // id несуществующего аддон-спелла НЕ отсеиваем здесь — переустановка аддона вернёт его
+                // (фильтрация только при сборке боевой цели). См. план §3.1.
+                // Дубли из ручного/импортного JSON отсеиваем (первое вхождение побеждает):
+                // задвоенный id — задвоенный вес спелла в пулах WizardAttackGoal.
+                java.util.Set<String> seenSpellIds = new java.util.HashSet<>();
+                for (JsonElement e : magic.getAsJsonArray("spells")) {
+                    MagicSpell ms = MagicSpell.fromJson(e.getAsJsonObject());
+                    if (seenSpellIds.add(ms.id())) {
+                        profile.magicSpells.add(ms);
+                    }
+                }
+            }
         }
         return profile;
     }
@@ -1464,8 +1752,32 @@ public class CompanionProfile {
         if (!pursueAttacker) {
             json.addProperty("pursue_attacker", false);
         }
+        if (!provokeEnabled) {
+            json.addProperty("provoke_enabled", false);
+        }
+        if (provokeHits != 3) {
+            json.addProperty("provoke_hits", provokeHits);
+        }
+        if (provokeHpPct != 15) {
+            json.addProperty("provoke_hp_pct", provokeHpPct);
+        }
+        if (provokeWindowSec != 10) {
+            json.addProperty("provoke_window_s", provokeWindowSec);
+        }
+        if (!provokeIgnoreEscort) {
+            json.addProperty("provoke_ignore_escort", false);
+        }
+        if (forgiveAfterSec != 20) {
+            json.addProperty("forgive_after_s", forgiveAfterSec);
+        }
+        if (!escortNoHarmOwner) {
+            json.addProperty("escort_no_harm_owner", false);
+        }
         if (holdPosition) {
             json.addProperty("hold_position", true);
+        }
+        if (supportAllies) {
+            json.addProperty("support_allies", true);
         }
         if (!followMatchSpeed) {
             json.addProperty("follow_match_speed", false);
@@ -1547,6 +1859,12 @@ public class CompanionProfile {
             json.addProperty("idle_emote_name", idleEmoteName);
             json.addProperty("idle_emote_author", idleEmoteAuthor);
         }
+        if (!deathEmoteId.isEmpty()) {
+            json.addProperty("death_emote", deathEmoteId);
+            json.addProperty("death_emote_name", deathEmoteName);
+            json.addProperty("death_emote_author", deathEmoteAuthor);
+            json.addProperty("death_emote_secs", deathEmoteSecs);
+        }
         if (!"undefined".equals(mobType)) {
             json.addProperty("mob_type", mobType);
         }
@@ -1627,6 +1945,37 @@ public class CompanionProfile {
         }
         json.addProperty("ambient_radius", ambientRadius);
         json.addProperty("ambient_cooldown_s", ambientCooldownSeconds);
+        // Секцию пишем и при пустом лоадауте, если интервалы/качество отличаются от дефолтов:
+        // иначе настроенные крутилки без спеллов терялись бы при раунд-трипе JSON.
+        if (!magicSpells.isEmpty() || magicFlee || magicSpellsFromWeapon
+                || !magicAttrs.isEmpty()
+                || magicMinInterval != MAGIC_MIN_INTERVAL_DEFAULT
+                || magicMaxInterval != MAGIC_MAX_INTERVAL_DEFAULT
+                || magicMinQuality != MAGIC_MIN_QUALITY_DEFAULT
+                || magicMaxQuality != MAGIC_MAX_QUALITY_DEFAULT) {
+            JsonObject magic = new JsonObject();
+            magic.addProperty("min_interval", magicMinInterval);
+            magic.addProperty("max_interval", magicMaxInterval);
+            magic.addProperty("min_quality", magicMinQuality);
+            magic.addProperty("max_quality", magicMaxQuality);
+            if (magicFlee) {
+                magic.addProperty("flee", true);
+            }
+            if (magicSpellsFromWeapon) {
+                magic.addProperty("spells_from_weapon", true);
+            }
+            if (!magicSpells.isEmpty()) {
+                JsonArray spells = new JsonArray();
+                magicSpells.forEach(s -> spells.add(s.toJson()));
+                magic.add("spells", spells);
+            }
+            if (!magicAttrs.isEmpty()) {
+                JsonObject attrs = new JsonObject();
+                magicAttrs.forEach(attrs::addProperty);
+                magic.add("attrs", attrs);
+            }
+            json.add("magic", magic);
+        }
         return json;
     }
 

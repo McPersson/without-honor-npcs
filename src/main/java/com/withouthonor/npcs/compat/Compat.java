@@ -9,6 +9,7 @@ public final class Compat {
     public static final String CARRYON = "carryon";
     public static final String ETCHED = "etched";
     public static final String EPICFIGHT = "epicfight";
+    public static final String IRONS_SPELLBOOKS = "irons_spellbooks";
 
     private static Boolean emotecraftLoaded;
     private static EmotecraftBridge emotecraft;
@@ -18,6 +19,8 @@ public final class Compat {
     private static Boolean etchedLoaded;
     private static EtchedBridge etched;
     private static Boolean epicFightLoaded;
+    private static Boolean ironsSpellsLoaded;
+    private static IronsSpellsBridge ironsSpells;
 
     private Compat() {
     }
@@ -100,5 +103,44 @@ public final class Compat {
             epicFightLoaded = ModList.get() != null && ModList.get().isLoaded(EPICFIGHT);
         }
         return epicFightLoaded;
+    }
+
+    public static boolean ironsSpellsLoaded() {
+        if (ironsSpellsLoaded == null) {
+            ironsSpellsLoaded = ModList.get() != null && ModList.get().isLoaded(IRONS_SPELLBOOKS);
+        }
+        return ironsSpellsLoaded;
+    }
+
+    public static IronsSpellsBridge ironsSpells() {
+        if (ironsSpells == null) {
+            if (ironsSpellsLoaded()) {
+                ironsSpells = new com.withouthonor.npcs.compat.ironsspells.IronsSpellsBridgeImpl();
+            } else {
+                ironsSpells = NoopIronsSpellsBridge.INSTANCE;
+            }
+        }
+        return ironsSpells;
+    }
+
+    private static IronsSpellsClientBridge ironsSpellsClient;
+    private static boolean ironsSpellsClientInit;
+
+    /**
+     * Клиентский мост анимаций каста. Создаётся лениво и ТОЛЬКО при ISS + Dist.CLIENT (иначе null).
+     * Зовётся исключительно из клиентского рендера — на сервере класс Impl не грузится.
+     */
+    @javax.annotation.Nullable
+    public static IronsSpellsClientBridge ironsSpellsClient() {
+        if (!ironsSpellsClientInit) {
+            ironsSpellsClientInit = true;
+            if (ironsSpellsLoaded()
+                    && net.minecraftforge.fml.loading.FMLEnvironment.dist
+                            == net.minecraftforge.api.distmarker.Dist.CLIENT) {
+                ironsSpellsClient =
+                        new com.withouthonor.npcs.compat.ironsspells.client.IronsSpellsClientImpl();
+            }
+        }
+        return ironsSpellsClient;
     }
 }

@@ -38,6 +38,7 @@ public class ClientPrefs {
     private final Set<String> pinnedPoses = new HashSet<>();
     private final Set<String> favoriteEmotes = new HashSet<>();
     private String uiTheme = "dark";
+    private boolean magicCastAnimations = true;
 
     public static ClientPrefs get() {
         if (instance == null) {
@@ -76,6 +77,9 @@ public class ClientPrefs {
             if (json.has("ui_theme")) {
                 uiTheme = json.get("ui_theme").getAsString();
             }
+            if (json.has("magic_cast_animations")) {
+                magicCastAnimations = json.get("magic_cast_animations").getAsBoolean();
+            }
         } catch (Exception e) {
             WHCompanions.LOGGER.warn("Failed to read client prefs", e);
         }
@@ -106,6 +110,7 @@ public class ClientPrefs {
         json.add("pinned_poses", toArray(pinnedPoses));
         json.add("favorite_emotes", toArray(favoriteEmotes));
         json.addProperty("ui_theme", uiTheme);
+        json.addProperty("magic_cast_animations", magicCastAnimations);
         try (Writer writer = Files.newBufferedWriter(file(), StandardCharsets.UTF_8)) {
             GSON.toJson(json, writer);
         } catch (Exception e) {
@@ -275,6 +280,16 @@ public class ClientPrefs {
 
     public void setUiTheme(String theme) {
         uiTheme = theme;
+        save();
+    }
+
+    /** Играть ли анимации каста Iron's Spells на NPC (config/wh_npcs-client.json, по умолчанию true). */
+    public boolean isMagicCastAnimations() {
+        return magicCastAnimations;
+    }
+
+    public void setMagicCastAnimations(boolean v) {
+        magicCastAnimations = v;
         save();
     }
 }

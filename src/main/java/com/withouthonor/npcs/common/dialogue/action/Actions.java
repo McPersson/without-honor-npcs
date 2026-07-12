@@ -1020,7 +1020,7 @@ public final class Actions {
                               @Nullable Float damage, @Nullable Float armor, boolean heal)
             implements DialogueAction {
 
-        private static final Set<String> PRESETS = Set.of("passive", "melee", "shield", "bow", "potion");
+        private static final Set<String> PRESETS = Set.of("passive", "melee", "shield", "bow", "potion", "mage");
 
         @Override
         public String type() {
@@ -1132,6 +1132,87 @@ public final class Actions {
         public JsonObject toJson() {
             JsonObject json = new JsonObject();
             json.addProperty("type", type());
+            return json;
+        }
+    }
+
+    /**
+     * Пауза перед следующими действиями списка (#2). НЕ блокирует: DialogueAction.executeFrom при
+     * встрече Wait кладёт остаток в отложенную очередь NPC. Переход на след. узел диалога происходит
+     * сразу; wait откладывает лишь действия ПОСЛЕ себя. Не переживает рестарт мира и смерть NPC.
+     */
+    public record Wait(float seconds) implements DialogueAction {
+
+        @Override
+        public String type() {
+            return "wait";
+        }
+
+        @Override
+        public void execute(DialogueCondition.Context ctx) {
+            // Само ожидание реализовано в DialogueAction.executeFrom (постановка в очередь NPC).
+            // execute() зовётся, только если Wait исполняют «в лоб» (без staged-пути) — тогда no-op.
+        }
+
+        public static Wait fromJson(JsonObject json) {
+            float s = json.has("seconds") ? json.get("seconds").getAsFloat() : 1.0F;
+            return new Wait(Math.max(0.05F, Math.min(600.0F, s)));
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("type", type());
+            json.addProperty("seconds", seconds);
+            return json;
+        }
+    }
+
+    /**
+     * Кастовать заклинание Iron's Spells по реплике (сценарный каст, не боевой ИИ).
+     * Драйвер каста тикается при загруженном ISS независимо от пресета, поэтому работает у любого NPC.
+     * targetSelf=false → целимся в собеседника (снаряды летят в игрока; NPC берёт его целью
+     * на время каста, по завершении цель снимается — если её поставило само действие);
+     * targetSelf=true → каст на себя (баффы/лечение/призыв/AoE вокруг). Без ISS — тихо ничего.
+     */
+    public record CastSpell(String spellId, int level, boolean targetSelf) implements DialogueAction {
+
+        @Override
+        public String type() {
+            return "cast_spell";
+        }
+
+        @Override
+        public void execute(DialogueCondition.Context ctx) {
+            com.withouthonor.npcs.common.entity.CompanionEntity npc = ctx.npc();
+            if (npc == null || spellId == null || spellId.isBlank()
+                    || !com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()) {
+                return;
+            }
+            if (targetSelf) {
+                com.withouthonor.npcs.compat.Compat.ironsSpells().castSpell(npc, spellId, level);
+            } else {
+                // Прицел = собеседник; мост сам снимет цель по завершении каста, если её поставил он
+                com.withouthonor.npcs.compat.Compat.ironsSpells().castSpellAt(npc, spellId, level, ctx.player());
+            }
+        }
+
+        public static CastSpell fromJson(JsonObject json) {
+            return new CastSpell(
+                    json.has("spell_id") ? json.get("spell_id").getAsString() : "",
+                    json.has("level") ? Math.max(1, Math.min(10, json.get("level").getAsInt())) : 1,
+                    json.has("target_self") && json.get("target_self").getAsBoolean());
+        }
+
+        @Override
+        public JsonObject toJson() {
+            JsonObject json = new JsonObject();
+            json.addProperty("type", type());
+            json.addProperty("spell_id", spellId);
+            json.addProperty("level", level);
+            if (targetSelf) {
+                json.addProperty("target_self", true);
+            }
             return json;
         }
     }

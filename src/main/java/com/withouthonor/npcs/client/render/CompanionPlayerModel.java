@@ -7,8 +7,18 @@ import net.minecraft.client.model.geom.ModelPart;
 
 public class CompanionPlayerModel extends PlayerModel<CompanionEntity> {
 
+    // База позиций из запечённой модели (слои анимации их ещё не трогали). Ваниль setupAnim
+    // сбрасывает y рук и y/z ног каждый кадр сама, а x/z рук и x ног — нет: их зачищаем в resetStaleAxes.
+    private final float baseRightArmX, baseLeftArmX, baseRightArmZ, baseLeftArmZ, baseRightLegX, baseLeftLegX;
+
     public CompanionPlayerModel(ModelPart root, boolean slim) {
         super(root, slim);
+        this.baseRightArmX = this.rightArm.x;
+        this.baseLeftArmX = this.leftArm.x;
+        this.baseRightArmZ = this.rightArm.z;
+        this.baseLeftArmZ = this.leftArm.z;
+        this.baseRightLegX = this.rightLeg.x;
+        this.baseLeftLegX = this.leftLeg.x;
     }
 
     @Override
@@ -23,8 +33,16 @@ public class CompanionPlayerModel extends PlayerModel<CompanionEntity> {
 
         com.withouthonor.npcs.compat.EmotecraftClientBridge emote =
                 com.withouthonor.npcs.compat.Compat.emotecraftClient();
-        if (emote != null && emote.applyEmote(entity,
+        boolean animated = emote != null && emote.applyEmote(entity,
+                this.head, this.body, this.rightArm, this.leftArm, this.rightLeg, this.leftLeg);
+        // Анимация каста ISS — отдельный слой, поверх эмоции (если каст активен, он перекрывает жест).
+        com.withouthonor.npcs.compat.IronsSpellsClientBridge cast =
+                com.withouthonor.npcs.compat.Compat.ironsSpellsClient();
+        if (cast != null && cast.applyCast(entity,
                 this.head, this.body, this.rightArm, this.leftArm, this.rightLeg, this.leftLeg)) {
+            animated = true;
+        }
+        if (animated) {
             copyOverlays();
         }
     }
@@ -97,7 +115,19 @@ public class CompanionPlayerModel extends PlayerModel<CompanionEntity> {
         } else {
             aim = false;
         }
-        if (aim) {
+        // Поза щита (щит в любой руке): resetStaleAxes зануляет yRot каждый кадр — как у лука,
+        // возвращаем yRot блока. Ваниль HumanoidModel.poseRightArm/poseLeftArm (ArmPose.BLOCK):
+        // правая yRot = -π/6, левая зеркально +π/6. xRot переживает reset — его не трогаем.
+        boolean block = false;
+        if (this.rightArmPose == net.minecraft.client.model.HumanoidModel.ArmPose.BLOCK) {
+            this.rightArm.yRot = -0.5235988F;
+            block = true;
+        }
+        if (this.leftArmPose == net.minecraft.client.model.HumanoidModel.ArmPose.BLOCK) {
+            this.leftArm.yRot = 0.5235988F;
+            block = true;
+        }
+        if (aim || block) {
             copyOverlays();
         }
     }
@@ -129,6 +159,20 @@ public class CompanionPlayerModel extends PlayerModel<CompanionEntity> {
         this.head.zRot = 0F;
         this.body.xRot = 0F;
         this.body.zRot = 0F;
+        // Позиции: анимационные слои (каст/эмоции) пишут part.x/y/z, а ваниль setupAnim
+        // сбрасывает только head.y и body.y — остальные оси зачищаем сами, иначе смещение залипает
+        this.head.x = 0F;
+        this.head.z = 0F;
+        this.body.x = 0F;
+        this.body.z = 0F;
+        // Позиции рук/ног по неванильным осям — обратно к базе, иначе смещение position-кейфрейма
+        // каста/эмоции залипает (y рук и y/z ног ваниль сбрасывает сама, их не трогаем)
+        this.rightArm.x = this.baseRightArmX;
+        this.leftArm.x = this.baseLeftArmX;
+        this.rightArm.z = this.baseRightArmZ;
+        this.leftArm.z = this.baseLeftArmZ;
+        this.rightLeg.x = this.baseRightLegX;
+        this.leftLeg.x = this.baseLeftLegX;
         this.rightArm.yRot = 0F;
         this.leftArm.yRot = 0F;
         this.rightLeg.yRot = 0F;

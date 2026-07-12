@@ -78,6 +78,7 @@ public class NpcEditorScreen extends ScaledScreen {
     private String draftFacPenalty = "0";
 
     private final java.util.LinkedHashSet<String> draftHostile = new java.util.LinkedHashSet<>();
+    private boolean draftFacFriendlyFire; // #6: разрешить урон по своим (деф. запрещён)
     private int facColor = 0xFF55FFFF;
     private final List<String> tierNames = new ArrayList<>();
     private final List<Integer> tierMins = new ArrayList<>();
@@ -101,9 +102,10 @@ public class NpcEditorScreen extends ScaledScreen {
     private boolean hostilePicker;
     private int hostilePickerScroll;
 
-    static final String[] PRESET_IDS = {"passive", "melee", "shield", "bow", "potion"};
+    static final String[] PRESET_IDS = {"passive", "melee", "shield", "bow", "potion", "mage"};
     static final String[] PRESET_NAME_KEYS = {"wh_npcs.ui.npc.preset_passive", "wh_npcs.ui.npc.preset_melee",
-            "wh_npcs.ui.npc.preset_shield", "wh_npcs.ui.npc.preset_bow", "wh_npcs.ui.npc.preset_potion"};
+            "wh_npcs.ui.npc.preset_shield", "wh_npcs.ui.npc.preset_bow", "wh_npcs.ui.npc.preset_potion",
+            "wh_npcs.ui.npc.preset_mage"};
 
     static final String[] MOBTYPE_IDS = {"undefined", "undead", "arthropod", "water", "illager"};
     static final String[] MOBTYPE_NAME_KEYS = {"wh_npcs.ui.npc.mobtype_normal", "wh_npcs.ui.npc.mobtype_undead",
@@ -111,7 +113,8 @@ public class NpcEditorScreen extends ScaledScreen {
 
     static final String[] PRESET_DESC_KEYS = {"wh_npcs.ui.npc.preset_desc_passive",
             "wh_npcs.ui.npc.preset_desc_melee", "wh_npcs.ui.npc.preset_desc_shield",
-            "wh_npcs.ui.npc.preset_desc_bow", "wh_npcs.ui.npc.preset_desc_potion"};
+            "wh_npcs.ui.npc.preset_desc_bow", "wh_npcs.ui.npc.preset_desc_potion",
+            "wh_npcs.ui.npc.preset_desc_mage"};
     private final net.minecraft.resources.ResourceLocation[] dropItem =
             new net.minecraft.resources.ResourceLocation[9];
     private final net.minecraft.nbt.CompoundTag[] dropNbt = new net.minecraft.nbt.CompoundTag[9];
@@ -1222,12 +1225,22 @@ public class NpcEditorScreen extends ScaledScreen {
         g.drawString(font, tr("wh_npcs.ui.npc.combat_sec_gear"), rx, contentY + 2, VanillaUIHelper.TEXT_GRAY, false);
         VanillaUIHelper.drawSeparator(g, rx, contentY + 12, 226);
 
-        boolean beltHover = isOver(mouseX, mouseY, rx, contentY + 18, 200, 18);
-        VanillaUIHelper.drawButton(g, rx, contentY + 18, 200, 18, beltHover);
-        g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_potion_belt"), rx + 100, contentY + 23,
+        boolean beltHover = isOver(mouseX, mouseY, rx, contentY + 18, 98, 18);
+        VanillaUIHelper.drawButton(g, rx, contentY + 18, 98, 18, beltHover);
+        g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_potion_belt"), rx + 49, contentY + 23,
                 beltHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA);
         if (beltHover) {
             tooltip = tr("wh_npcs.ui.npc.potion_belt_tip");
+        }
+        boolean magicIssLoaded = com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded();
+        int magicBtnX = rx + 102;
+        boolean magicOver = isOver(mouseX, mouseY, magicBtnX, contentY + 18, 98, 18);
+        VanillaUIHelper.drawButton(g, magicBtnX, contentY + 18, 98, 18, magicOver && magicIssLoaded);
+        g.drawCenteredString(font, tr("wh_npcs.ui.npc.btn_magic"), magicBtnX + 49, contentY + 23,
+                !magicIssLoaded ? VanillaUIHelper.TEXT_DARK_GRAY
+                        : (magicOver ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_AQUA));
+        if (magicOver) {
+            tooltip = tr(magicIssLoaded ? "wh_npcs.ui.npc.magic_tip" : "wh_npcs.ui.npc.magic_need_iss");
         }
         boolean natHover = isOver(mouseX, mouseY, rx, contentY + 40, 200, 18);
         VanillaUIHelper.drawButton(g, rx, contentY + 40, 200, 18, natHover);
@@ -1251,10 +1264,10 @@ public class NpcEditorScreen extends ScaledScreen {
         String death = profileJson.has("death_behavior")
                 ? profileJson.get("death_behavior").getAsString() : "respawn";
         boolean respawn = !"vanish".equals(death);
-        boolean deathHover = isOver(mouseX, mouseY, rx + 52, contentY + 102, 130, 18);
-        VanillaUIHelper.drawButton(g, rx + 52, contentY + 102, 130, 18, deathHover);
+        boolean deathHover = isOver(mouseX, mouseY, rx + 52, contentY + 102, 148, 18);
+        VanillaUIHelper.drawButton(g, rx + 52, contentY + 102, 148, 18, deathHover);
         g.drawCenteredString(font, respawn ? tr("wh_npcs.ui.npc.death_respawn") : tr("wh_npcs.ui.npc.death_vanish"),
-                rx + 117, contentY + 107,
+                rx + 126, contentY + 107,
                 deathHover ? VanillaUIHelper.TEXT_YELLOW
                         : (respawn ? VanillaUIHelper.TEXT_GREEN : VanillaUIHelper.TEXT_RED));
         if (deathHover) {
@@ -1483,9 +1496,18 @@ public class NpcEditorScreen extends ScaledScreen {
             return true;
         }
 
-        if (isOver(mouseX, mouseY, rx, contentY + 18, 200, 18)) {
+        if (isOver(mouseX, mouseY, rx, contentY + 18, 98, 18)) {
             if (minecraft != null) {
                 minecraft.setScreen(new PotionBeltScreen(this, profileJson));
+            }
+            return true;
+        }
+        if (com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()
+                && isOver(mouseX, mouseY, rx + 102, contentY + 18, 98, 18)) {
+            if (minecraft != null) {
+                // id сущности — для чтения спеллбука из Curios-слота (книжные строки лоадаута)
+                minecraft.setScreen(new MagicLoadoutScreen(this, profileJson,
+                        npc != null ? npc.getId() : -1));
             }
             return true;
         }
@@ -1502,7 +1524,7 @@ public class NpcEditorScreen extends ScaledScreen {
             return true;
         }
 
-        if (isOver(mouseX, mouseY, rx + 52, contentY + 102, 130, 18)) {
+        if (isOver(mouseX, mouseY, rx + 52, contentY + 102, 148, 18)) {
             String death = profileJson.has("death_behavior")
                     ? profileJson.get("death_behavior").getAsString() : "respawn";
             profileJson.addProperty("death_behavior", "vanish".equals(death) ? "respawn" : "vanish");
@@ -1690,6 +1712,12 @@ public class NpcEditorScreen extends ScaledScreen {
         return contentY + 114 + t * 22;
     }
 
+    /** Y чекбокса «свои не бьют своих» — под кнопкой «+ тир» (или под последним тиром при 6 тирах). */
+    private int facFriendlyFireY() {
+        int base = facTierRowY(tierNames.size()) + 2;
+        return base + (tierNames.size() < 6 ? 22 : 0);
+    }
+
     private void buildFactionWidgets() {
         tierNameBoxes.clear();
         tierMinBoxes.clear();
@@ -1769,6 +1797,7 @@ public class NpcEditorScreen extends ScaledScreen {
         draftFacPenalty = String.valueOf(faction.getKillPenalty());
         draftHostile.clear();
         draftHostile.addAll(faction.getHostileTo());
+        draftFacFriendlyFire = faction.isFriendlyFire();
         facColor = faction.getColor();
         tierNames.clear();
         tierMins.clear();
@@ -1804,7 +1833,7 @@ public class NpcEditorScreen extends ScaledScreen {
         }
         return new com.withouthonor.npcs.common.reputation.Faction(selectedFaction,
                 draftFacName.isBlank() ? selectedFaction : draftFacName.trim(), facColor, penalty, tiers,
-                hostileTo);
+                hostileTo, draftFacFriendlyFire);
     }
 
     private void flushFaction() {
@@ -2863,6 +2892,20 @@ public class NpcEditorScreen extends ScaledScreen {
                 g.drawCenteredString(font, tr("wh_npcs.ui.npc.fac_add_tier"), fx + 35, addY + 4,
                         addHover ? VanillaUIHelper.TEXT_YELLOW : VanillaUIHelper.TEXT_GREEN);
             }
+
+            // #2 (0.9.4): «Дружественный огонь». Галка = урон по своим РАЗРЕШЁН (friendlyFire=true),
+            // по умолчанию снята — свои защищены. Семантика поля/json/пакетов не менялась, только отображение.
+            int ffY = facFriendlyFireY();
+            boolean ffHover = isOver(mouseX, mouseY, fx, ffY, 12, 12);
+            VanillaUIHelper.drawButton(g, fx, ffY, 12, 12, ffHover);
+            if (draftFacFriendlyFire) {
+                VanillaUIHelper.drawCheck(g, fx + 1, ffY + 2, VanillaUIHelper.TEXT_GREEN);
+            }
+            g.drawString(font, tr("wh_npcs.ui.npc.fac_friendly_fire"), fx + 16, ffY + 2,
+                    VanillaUIHelper.TEXT_GRAY, false);
+            if (ffHover || isOver(mouseX, mouseY, fx + 16, ffY, 220, 12)) {
+                tooltip = tr("wh_npcs.ui.npc.fac_friendly_fire_tip");
+            }
         }
         if (tooltip != null && confirmTitle == null) {
             multilineTooltip(g, tooltip, mouseX, mouseY);
@@ -3105,6 +3148,13 @@ public class NpcEditorScreen extends ScaledScreen {
             tierPrices.add(1.0F);
             facDirty = true;
             init(minecraft, width, height);
+            return true;
+        }
+        // Клик и по галке, и по подписи (зона == hover-зоне тултипа: 12×12 + 220px текста)
+        if (button == 0 && (isOver(mouseX, mouseY, fx, facFriendlyFireY(), 12, 12)
+                || isOver(mouseX, mouseY, fx + 16, facFriendlyFireY(), 220, 12))) {
+            draftFacFriendlyFire = !draftFacFriendlyFire;
+            facDirty = true;
             return true;
         }
         return false;

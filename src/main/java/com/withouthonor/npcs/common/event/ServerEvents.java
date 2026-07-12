@@ -20,6 +20,36 @@ public class ServerEvents {
         WhcCommand.register(event.getDispatcher());
     }
 
+    /**
+     * Дружественный огонь (#6). Отменяем ДО нокбека/звука на LivingAttackEvent. Атакер — владелец
+     * снаряда/кастер (event.getSource().getEntity()), покрывает стрелы/копья(setOwner)/ISS-касты.
+     * Ранние выходы по дешевизне: атакер-NPC → жертва-NPC своей фракции без friendly-fire ИЛИ
+     * жертва-сопровождаемый игрок. Саммоны ISS (source=саммон, не NPC) вне охвата v1 (осознанно).
+     */
+    @SubscribeEvent
+    public static void onLivingAttack(net.minecraftforge.event.entity.living.LivingAttackEvent event) {
+        if (event.getEntity().level().isClientSide) {
+            return;
+        }
+        if (!(event.getSource().getEntity() instanceof CompanionEntity npc)) {
+            return;
+        }
+        net.minecraft.world.entity.LivingEntity victim = event.getEntity();
+        // Гейт А — фракция: свои не бьют своих (если у фракции не разрешён friendly fire).
+        if (victim instanceof CompanionEntity vc && vc != npc
+                && npc.isSameFaction(vc) && !npc.factionAllowsFriendlyFire()) {
+            event.setCanceled(true);
+            return;
+        }
+        // Гейт Б — напарник не ранит сопровождаемого игрока (оба пути следования).
+        if (victim instanceof net.minecraft.server.level.ServerPlayer sp && npc.escortNoHarm()) {
+            net.minecraft.world.entity.player.Player esc = npc.escortedPlayer();
+            if (esc != null && esc.getUUID().equals(sp.getUUID())) {
+                event.setCanceled(true);
+            }
+        }
+    }
+
     @SubscribeEvent
     public static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         DialogueSessions.remove(event.getEntity().getUUID());

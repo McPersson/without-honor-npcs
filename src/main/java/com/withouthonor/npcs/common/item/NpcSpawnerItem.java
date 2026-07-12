@@ -49,6 +49,9 @@ public class NpcSpawnerItem extends Item {
         npc.setProfileId(profile.getId());
         npc.setCustomName(Component.literal("NPC"));
         serverLevel.addFreshEntity(npc);
+        // Профиль применился в EntityJoinLevel (внутри addFreshEntity), но setHealth там нельзя
+        // (событие ловит и перезагрузку чанков) — при свежем спавне добиваем HP до max сами.
+        npc.setHealth(npc.getMaxHealth());
 
         player.displayClientMessage(Component.translatable("wh_npcs.msg.spawner.created"), true);
         return InteractionResult.CONSUME;

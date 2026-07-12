@@ -179,10 +179,12 @@ public final class ProfileSharePackets {
             json.addProperty("id", npc.getProfileId().toString());
             CompanionProfile profile = CompanionProfile.fromJson(json);
             ProfileManager.get().save(profile);
-            ProfileSync.applyToLoadedEntities(server, profile);
+            // Экипировка ДО applyToLoadedEntities: rebuildCombatGoals читает оружие из рук
+            // (mage «с оружия», bow/crossbow/trident) — иначе цели соберутся по старому предмету.
             if (withEquipment) {
                 applyEquipment(json, npc);
             }
+            ProfileSync.applyToLoadedEntities(server, profile);
         } catch (Exception e) {
             WHCompanions.LOGGER.warn("transform: failed for file '{}': {}", file, e.getMessage());
         }
@@ -376,8 +378,9 @@ public final class ProfileSharePackets {
                 json.addProperty("id", npc.getProfileId().toString());
                 CompanionProfile profile = CompanionProfile.fromJson(json);
                 ProfileManager.get().save(profile);
-                ProfileSync.applyToLoadedEntities(sender.server, profile);
+                // Экипировка ДО applyToLoadedEntities — см. комментарий в transformFromExport.
                 applyEquipment(json, npc);
+                ProfileSync.applyToLoadedEntities(sender.server, profile);
                 EditorDataPacket.send(sender, profile, p.entityId);
                 sender.sendSystemMessage(Component.translatable("wh_npcs.msg.profile.import_ok", file));
             } catch (Exception e) {
@@ -570,6 +573,9 @@ public final class ProfileSharePackets {
                 npc.setCustomName(Component.literal(name));
                 applyEquipment(json, npc);
                 level.addFreshEntity(npc);
+                // Профиль применился в EntityJoinLevel, но HP осталось дефолтным (20) —
+                // при свежем спавне добиваем до max профиля.
+                npc.setHealth(npc.getMaxHealth());
                 sender.sendSystemMessage(Component.translatable("wh_npcs.msg.profile.spawned", file));
             } catch (Exception e) {
                 WHCompanions.LOGGER.warn("Spawn-from-file failed for {}: {}",
@@ -637,6 +643,9 @@ public final class ProfileSharePackets {
                 npc.setCustomName(Component.literal(name));
                 applyEquipment(json, npc);
                 level.addFreshEntity(npc);
+                // Профиль применился в EntityJoinLevel, но HP осталось дефолтным (20) —
+                // при свежем спавне добиваем до max профиля.
+                npc.setHealth(npc.getMaxHealth());
                 sender.sendSystemMessage(Component.translatable("wh_npcs.msg.profile.spawned", name));
             } catch (Exception e) {
                 WHCompanions.LOGGER.warn("Spawn-from-client failed for {}: {}",

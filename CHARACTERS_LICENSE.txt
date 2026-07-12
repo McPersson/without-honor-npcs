@@ -1,0 +1,46 @@
+CHARACTERS OF "WITHOUT HONOR: NPCS"
+===================================
+
+The original characters listed below, and their skin textures bundled with
+this mod, belong to the author of the mod "Without Honor: NPCs" and to the
+Without Honor project. Any use of these characters or textures outside of
+this mod requires explicit written permission of the mod author.
+
+All rights reserved.
+
+For every character listed below:
+
+You MAY:
+  - Use the character's skin in-game as a default NPC skin provided by
+    this mod.
+
+You MAY NOT, without explicit written permission of the mod author:
+  - Extract, copy, redistribute, or repackage the character's texture.
+  - Use the character or texture in other mods, resource packs,
+    products, or media.
+  - Create derivative works based on the character or texture.
+
+------------------------------------------------------------------------------
+1. ALESSIA
+------------------------------------------------------------------------------
+Character: Alessia — the official mascot and branding of the mod
+"Without Honor: NPCs".
+Skin texture: assets/wh_npcs/textures/entity/companion/alessia.png
+Terms: the common terms above apply.
+
+------------------------------------------------------------------------------
+2. ENNIE
+------------------------------------------------------------------------------
+Character: Ennie — an original character of the Without Honor project.
+Skin texture: assets/wh_npcs/textures/entity/companion/ennie.png
+Terms: the common terms above apply.
+
+------------------------------------------------------------------------------
+
+Note: This is a usage/licensing restriction, not a technical one. Like any
+texture shipped in a mod, the PNGs are technically extractable; protection is
+legal (these terms), not DRM. The rest of the mod's code/assets are covered
+by the mod's main license; this file governs ONLY the character assets
+listed above.
+
+Contact the mod author for licensing inquiries.

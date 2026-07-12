@@ -1,0 +1,15 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.withouthonor.npcs.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "wh_npcs.refmap.json",
+  "plugin": "com.withouthonor.npcs.mixin.WhMixinPlugin",
+  "mixins": [
+    "IssCompanionMixin",
+    "IssHealAllyMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
