@@ -142,6 +142,10 @@ public class NpcEditorScreen extends ScaledScreen {
 
     @Nullable
     private com.withouthonor.npcs.common.entity.CompanionEntity posePreviewNpc;
+    // Эмоция на превью-дамми: последний запущенный id и «играла ли на прошлом кадре» —
+    // перезапускаем по концу незацикленной анимации, но не ретраим каждый кадр при нерезолве
+    private String posePrevEmoteId = "";
+    private boolean posePrevEmoteWasPlaying;
     private float poseAngle = 180.0F;
     private long poseLastMs;
     private int poseFrozenTick;
@@ -630,12 +634,62 @@ public class NpcEditorScreen extends ScaledScreen {
         if (posePreviewNpc == null && minecraft != null && minecraft.level != null) {
             posePreviewNpc = com.withouthonor.npcs.common.registry.ModEntities.COMPANION.get()
                     .create(minecraft.level);
+            if (posePreviewNpc != null) {
+                // Отрицательный id: слои эмоций Emotecraft ключуются по entityId, а клиентский
+                // счётчик id может совпасть с сетевым id реального NPC — эмоция «протекла» бы на него
+                posePreviewNpc.setId(-posePreviewNpc.getId() - 1000);
+            }
             if (posePreviewNpc != null && npc != null) {
                 // Снаряжение на превью позы — чтобы было видно, как поза ляжет с бронёй/оружием.
                 posePreviewNpc.loadEquipmentSnapshot(npc.saveEquipmentSnapshot());
             }
         }
         return posePreviewNpc;
+    }
+
+    /** «Поза по частям» из черновика профиля на превью-дамми. Пишем только при изменении,
+     *  чтобы не дёргать setPoseClient/refreshDimensions каждый кадр. */
+    private void syncPreviewPose(com.withouthonor.npcs.common.entity.CompanionEntity p) {
+        var draft = new com.withouthonor.npcs.common.profile.PoseJson.Pose();
+        com.withouthonor.npcs.common.profile.PoseJson.read(profileJson, draft);
+        var cur = p.getPoseData();
+        if (draft.freeze == cur.freeze
+                && java.util.Arrays.equals(draft.angles, cur.angles)
+                && java.util.Arrays.equals(draft.hidden, cur.hidden)
+                && draft.bb[0] == cur.bb[0] && draft.bb[1] == cur.bb[1]) {
+            return;
+        }
+        p.setPoseClient(draft);
+    }
+
+    /** Эмоция (idle_emote) из черновика на превью-дамми: запуск при смене, перезапуск
+     *  по концу незацикленной анимации. Слой Emotecraft тикает глобально по entityId,
+     *  поэтому играет и на дамми вне мира. */
+    private void syncPreviewEmote(com.withouthonor.npcs.common.entity.CompanionEntity p) {
+        com.withouthonor.npcs.compat.EmotecraftClientBridge client =
+                com.withouthonor.npcs.compat.Compat.emotecraftClient();
+        if (client == null) {
+            return;
+        }
+        String id = str("idle_emote", "");
+        boolean playing = client.isPlaying(p);
+        if (id.isEmpty()) {
+            if (playing) {
+                com.withouthonor.npcs.compat.Compat.emotecraft().stopOn(p);
+            }
+            posePrevEmoteId = "";
+            posePrevEmoteWasPlaying = false;
+            return;
+        }
+        // Перезапуск только по смене эмоции или по её концу (была активна → кончилась):
+        // если эмоция не зарезолвилась, повторный playOn каждый кадр заспамил бы лог
+        if (!id.equals(posePrevEmoteId) || (!playing && posePrevEmoteWasPlaying)) {
+            com.withouthonor.npcs.compat.Compat.emotecraft().playOn(p,
+                    id, str("idle_emote_name", ""), str("idle_emote_author", ""));
+            posePrevEmoteId = id;
+            playing = client.isPlaying(p);
+        }
+        posePrevEmoteWasPlaying = playing;
     }
 
     private void renderPosePreview(GuiGraphics g, int mouseX, int mouseY, int x, int y, int w, int h) {
@@ -646,10 +700,15 @@ public class NpcEditorScreen extends ScaledScreen {
             return;
         }
         p.setSkinName(str("skin_player_name", ""));
+        // Позицию черновика превью игнорирует (модель всегда по центру рамки), поворот
+        // применяется вокруг центра модели (GUI_PREVIEW_CONTEXT в рендерере), масштаб как есть
         p.setRenderTransformClient(
                 numF("rot_x", 0), numF("rot_y", 0), numF("rot_z", 0),
-                numF("pos_x", 0), numF("pos_y", 0), numF("pos_z", 0),
+                0F, 0F, 0F,
                 numF("scale_x", 1), numF("scale_y", 1), numF("scale_z", 1));
+        // «Поза по частям» и эмоция из черновика — превью показывает их как в мире
+        syncPreviewPose(p);
+        syncPreviewEmote(p);
         long now = System.currentTimeMillis();
         if (!poseRotDrag && !posePaused) {
             poseAngle = (poseAngle + (now - poseLastMs) * 0.04F) % 360.0F;
@@ -698,11 +757,15 @@ public class NpcEditorScreen extends ScaledScreen {
         var dispatcher = minecraft.getEntityRenderDispatcher();
         dispatcher.setRenderShadow(false);
         var buffer = minecraft.renderBuffers().bufferSource();
+        // Контекст превью: поворот трансформа в рендерере идёт вокруг центра модели
+        com.withouthonor.npcs.common.entity.CompanionEntity.GUI_PREVIEW_CONTEXT = true;
         try {
             dispatcher.render(e, 0, 0, 0, 0, 1.0F, pose, buffer,
                     net.minecraft.client.renderer.LightTexture.FULL_BRIGHT);
         } catch (Exception ignored) {
 
+        } finally {
+            com.withouthonor.npcs.common.entity.CompanionEntity.GUI_PREVIEW_CONTEXT = false;
         }
         buffer.endBatch();
         dispatcher.setRenderShadow(true);
@@ -4322,6 +4385,25 @@ public class NpcEditorScreen extends ScaledScreen {
             npc.revertRenderTransformPreview();
         }
         super.onClose();
+    }
+
+    @Override
+    public void removed() {
+        // Гасим эмоцию превью-дамми: слой Emotecraft ключуется по entityId и зацикленная
+        // анимация иначе тикала бы бесконечно после ухода с экрана. При возврате из
+        // дочернего экрана syncPreviewEmote перезапустит её сам (wasPlaying=true).
+        if (posePreviewNpc != null
+                && com.withouthonor.npcs.compat.Compat.emotecraftClient() != null) {
+            com.withouthonor.npcs.compat.Compat.emotecraft().stopOn(posePreviewNpc);
+            // stopOn оставляет пустой ModifierLayer в карте слоёв; дамми не проходит через
+            // EntityLeaveLevelEvent, поэтому чистим запись сами — иначе утечка на каждое открытие.
+            // onEntityUnload живёт только на Impl (паттерн как в ClientCacheCleanup).
+            if (com.withouthonor.npcs.compat.Compat.emotecraft()
+                    instanceof com.withouthonor.npcs.compat.emotecraft.EmotecraftBridgeImpl emote) {
+                emote.onEntityUnload(posePreviewNpc.getId());
+            }
+        }
+        super.removed();
     }
 
     private int equipRefreshTicks;

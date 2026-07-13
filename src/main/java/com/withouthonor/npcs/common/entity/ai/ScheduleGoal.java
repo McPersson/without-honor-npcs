@@ -36,11 +36,27 @@ public class ScheduleGoal extends Goal {
 
     @Override
     public boolean canUse() {
+        // #3: сцена смерти (эмоция перед смертью) — NPC заморожен, распорядок не стартует.
+        if (npc.isDeathStaged()) {
+            return false;
+        }
+        // В бою распорядок уступает: пока есть живая цель, не забираем MOVE и уж точно
+        // не телепортируем NPC из боя к точке распорядка (симметрично FollowPlayerGoal).
+        if (npc.getTarget() != null && npc.getTarget().isAlive()) {
+            return false;
+        }
         return npc.scheduleActive() && activeEntry() != null;
     }
 
     @Override
     public boolean canContinueToUse() {
+        // #3: сцена смерти началась посреди распорядка — немедленно останавливаемся.
+        if (npc.isDeathStaged()) {
+            return false;
+        }
+        if (npc.getTarget() != null && npc.getTarget().isAlive()) {
+            return false; // бой начался посреди распорядка — уступаем боевой цели
+        }
         return npc.scheduleActive() && activeEntry() != null;
     }
 

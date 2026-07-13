@@ -153,7 +153,15 @@ public class CompanionEntity extends PathfinderMob
     }
     /** Транзиент, per-UUID, кламп 16 записей; чистка по окну лениво в hurt(). */
     private final java.util.Map<java.util.UUID, ProvokeEntry> provokeState = new java.util.HashMap<>();
-    private int lastHurtByPlayerTick = -100000; // тик последнего удара любого игрока — для прощения
+    private int lastHurtByPlayerTick = -100000; // тик последнего удара игрока-цели — для прощения
+    /** Игрок, взятый в цель ЗА УДАРЫ (порог провокации/реванш) — только такие цели прощаются.
+     *  Цели из «кого атаковать»/природной вражды сюда не попадают и НЕ прощаются: 0.9.4b-регресс —
+     *  прощение снимало никогда не бившую цель каждую секунду → рывки движения всех боевых пресетов. */
+    @javax.annotation.Nullable
+    private java.util.UUID forgivablePlayerUuid;
+    /** Тик последнего фактического урона — метка для NpcPanicGoal. Транзиент. Паника завязана на неё,
+     *  а не на lastHurtByMob: то поле читает и HurtByTargetGoal, поэтому провокация его чистит всегда. */
+    private int recentlyPanicHurtTick = -100000;
     private boolean cfgEscortNoHarm = true; // #6: напарник не ранит сопровождаемого игрока
     // #3: эмоция перед смертью
     private String cfgDeathEmoteId = "";
@@ -185,6 +193,9 @@ public class CompanionEntity extends PathfinderMob
     private boolean cfgNaturalHostility = true;
     // Учтён ли этот NPC в CreatureAggroState (релевантен для агра/защиты); для симметричного дек/инкремента.
     private boolean aggroCounted;
+    // Можно ли атаковать NPC (галка профиля). Неатакуемый — не «приманка» по типу: effectiveAttackers()
+    // пуст (чужой моб не получает вечную неубиваемую цель) и в счётчик агра такой NPC не идёт.
+    private boolean cfgAttackable = true;
     private boolean cfgFallDamage = true;
     private boolean cfgWebSlow = true;
     private boolean cfgCanDrown = true;
@@ -394,6 +405,10 @@ public class CompanionEntity extends PathfinderMob
     private final float[] renderedPoseGui = new float[18];
     private boolean poseRenderInitGui;
     public static boolean GUI_POSE_CONTEXT;
+    // GUI-превью вкладки «Поза» (редактор NPC): поворот трансформа применяется вокруг
+    // ЦЕНТРА модели, чтобы модель не уезжала из рамки превью; позицию превью не применяет
+    // само (передаёт нули). Ставится только вокруг dispatcher.render превью. Клиент-only.
+    public static boolean GUI_PREVIEW_CONTEXT;
 
     private PoseJson.Pose cfgBasePose = new PoseJson.Pose();
     private float[] cfgBaseTransform = new float[]{0, 0, 0, 0, 0, 0, 1, 1, 1};
@@ -767,11 +782,21 @@ public class CompanionEntity extends PathfinderMob
             // Цели пересобираются (профиль сохранён/синкнут) — активный каст осиротел, гасим его.
             com.withouthonor.npcs.compat.Compat.ironsSpells().cancel(this);
         }
+        // Смена профиля = новый боевой контекст: протухшая метка «прощаемой» цели не должна
+        // пережить пересборку целей (иначе прощение снимало бы цель, взятую уже по новым правилам).
+        forgivablePlayerUuid = null;
         cacheFollowSettings(profile);
 
+        // followRange у дальнобойных пресетов ≥ дистанции атаки + запас: иначе TargetGoal
+        // сбрасывал бы цель прямо на рабочей дистанции выстрела/каста/броска.
         double followRange = cfgAggroRange > 0 ? cfgAggroRange : 16.0D;
         if ("bow".equals(profile.getCombatPreset())) {
             followRange = Math.max(followRange, profile.getRangedRange() + 8.0F);
+        } else if ("mage".equals(profile.getCombatPreset())) {
+            // spellcastingRange ISS = 20 (захардкожен в WizardAttackGoal, его НЕ поднимаем — баланс ISS).
+            followRange = Math.max(followRange, 28.0D);
+        } else if ("potion".equals(profile.getCombatPreset())) {
+            followRange = Math.max(followRange, profile.getPotionRange() + 8.0F);
         }
         getAttribute(Attributes.FOLLOW_RANGE).setBaseValue(followRange);
 
@@ -811,8 +836,9 @@ public class CompanionEntity extends PathfinderMob
                 this.goalSelector.addGoal(2, new com.withouthonor.npcs.common.entity.ai.NpcTridentAttackGoal(
                         this, 1.0D, interval, range));
                 // Фолбэк: если модовое копьё не метается (кэш) → цель отвалится, добиваем в melee (прио 3).
+                // false — как ваниль-зомби (см. addMeleeGoals).
                 this.goalSelector.addGoal(3, new net.minecraft.world.entity.ai.goal.MeleeAttackGoal(
-                        this, profile.getMeleeChaseSpeed(), true));
+                        this, profile.getMeleeChaseSpeed(), false));
             } else if (throwableAmmo) {
                 this.goalSelector.addGoal(2, new net.minecraft.world.entity.ai.goal.RangedAttackGoal(
                         this, 1.0D, interval, range));
@@ -836,9 +862,12 @@ public class CompanionEntity extends PathfinderMob
                             : null;
             if (mageGoal != null) {
                 this.goalSelector.addGoal(2, mageGoal);
-                // Гибрид: ближний бой, когда враг вплотную (ниже приоритетом, чем каст).
+                // Melee прио 3 — страховка на случай, когда каст-гол выбыл (WizardAttackGoal.canUse
+                // при живой цели истинен всегда, так что обычно melee НЕ стартует — как у родных
+                // ISS-магов; сработает лишь при смерти/подмене цели внутри ISS-гола).
+                // false — как ваниль-зомби (см. addMeleeGoals).
                 this.goalSelector.addGoal(3, new net.minecraft.world.entity.ai.goal.MeleeAttackGoal(
-                        this, profile.getMeleeChaseSpeed(), true));
+                        this, profile.getMeleeChaseSpeed(), false));
             } else {
                 // Без ISS или пустой/невалидный лоадаут — откат к ближнему бою, NPC не беспомощен (план §3.1).
                 if (com.withouthonor.npcs.compat.Compat.ironsSpellsLoaded()) {
@@ -905,10 +934,12 @@ public class CompanionEntity extends PathfinderMob
             this.goalSelector.addGoal(2,
                     new net.minecraft.world.entity.ai.goal.LeapAtTargetGoal(this, profile.getLeapStrength()));
         }
-        // followingTargetEvenIfNotSeen=true: цель держится, пока враг жив и в FOLLOW_RANGE, не гаснет
-        // на каждом ударе (иначе MOVE освобождается и follow-цель разворачивает NPC к игроку — «челнок»).
+        // followingTargetEvenIfNotSeen=false — как ваниль-зомби: цель гаснет в конце пути и тут же
+        // перезапускается со СВЕЖИМ путём. С true NPC застревал на краю дистанции удара у неподвижной
+        // цели (tick не перепрокладывает путь, если цель не сдвинулась) — «стоит вплотную и не бьёт».
+        // «Челнок» к игроку это не возвращает: follow-цели гардятся по getTarget() и MOVE в бою не берут.
         this.goalSelector.addGoal(2, new net.minecraft.world.entity.ai.goal.MeleeAttackGoal(
-                this, profile.getMeleeChaseSpeed(), true));
+                this, profile.getMeleeChaseSpeed(), false));
     }
 
     /** Природный враг по типу: другой NPC, чей тип входит в мой npcEnemies (нежить бьёт жителя).
@@ -1333,7 +1364,9 @@ public class CompanionEntity extends PathfinderMob
         setPathfindingMalus(net.minecraft.world.level.pathfinder.BlockPathTypes.DANGER_OTHER, danger);
 
         if (cfgPanic) {
-            this.goalSelector.addGoal(1, new net.minecraft.world.entity.ai.goal.PanicGoal(this, 1.5D));
+            // Свой PanicGoal: триггер по метке урона (recentlyPanicHurtTick), а не по lastHurtByMob —
+            // то поле провокация чистит всегда (см. suppressAggro), иначе паника не срабатывала бы.
+            this.goalSelector.addGoal(1, new com.withouthonor.npcs.common.entity.ai.NpcPanicGoal(this, 1.5D));
         }
         if (cfgAvoidSun) {
             this.goalSelector.addGoal(2, new net.minecraft.world.entity.ai.goal.RestrictSunGoal(this));
@@ -1345,12 +1378,15 @@ public class CompanionEntity extends PathfinderMob
         // страх доминирует над боевыми MOVE-голами (жертва бежит, а не дерётся). Союзники по фракции — не враги.
         if (cfgNaturalHostility && CreatureType.hasPredators(cfgCreatureType)) {
             // Скан хищника троттлится ~раз в 10 тиков (как агро/защита), а не каждый кадр.
+            // Гейт getTarget()==null: жертва в бою (боевой «стражник-житель») дерётся, а не бежит.
             this.goalSelector.addGoal(1, new com.withouthonor.npcs.common.entity.ai.ThrottledAvoidEntityGoal<>(
                     this, CompanionEntity.class, 8.0F, 1.0D, 1.3D,
                     e -> e instanceof CompanionEntity oc
+                            // Хищник с выключенной «природной враждой» не агрит по типу — и не пугает.
+                            && oc.isNaturalHostilityEnabled()
                             && oc.getCreatureType().npcEnemies().contains(cfgCreatureType)
                             && !isSameFaction(oc),
-                    10));
+                    10, () -> getTarget() == null));
         }
         if (!"none".equals(cfgAutoFollowMode)) {
             this.goalSelector.addGoal(3,
@@ -1459,6 +1495,9 @@ public class CompanionEntity extends PathfinderMob
         cfgCreatureType = CreatureType.byId(profile.getCreatureType());
         cfgCustomAttackers = parseGroups(profile.getCreatureCustomAttackers());
         cfgNaturalHostility = profile.isNaturalHostility();
+        // Атакуемость — ДО пересчёта счётчика: гейт effectiveAttackers() зависит от неё, а update()
+        // симметрично декрементит, если NPC стал неатакуемым при смене профиля (без рассинхрона).
+        cfgAttackable = profile.isAttackable();
         if (!level().isClientSide) {
             // Счётчик релевантных NPC для дешёвого гейта canUse (агра И защита).
             boolean now = !effectiveAttackers().isEmpty() || !effectiveDefenders().isEmpty();
@@ -1563,8 +1602,23 @@ public class CompanionEntity extends PathfinderMob
         return cfgCreatureType;
     }
 
-    /** Эффективные группы-атакующие: у кастома — из профиля, иначе — из пресета типа. */
+    /** Тумблер «природной вражды» этого NPC: выключенный хищник не агрит по типу и НЕ пугает жертв. */
+    public boolean isNaturalHostilityEnabled() {
+        return cfgNaturalHostility;
+    }
+
+    /** Тик последнего фактического урона — триггер паники (см. NpcPanicGoal). */
+    public int getRecentlyPanicHurtTick() {
+        return recentlyPanicHurtTick;
+    }
+
+    /** Эффективные группы-атакующие: у кастома — из профиля, иначе — из пресета типа.
+     *  Неатакуемый NPC (профиль запрещает урон) для чужих мобов пуст — иначе моб зациклится
+     *  на неубиваемой цели. Защитники/страх не гейтим — они на атакуемость не завязаны. */
     public java.util.Set<MobGroup> effectiveAttackers() {
+        if (!cfgAttackable) {
+            return java.util.Set.of();
+        }
         return cfgCreatureType == CreatureType.CUSTOM ? cfgCustomAttackers : cfgCreatureType.attackers();
     }
 
@@ -1631,6 +1685,11 @@ public class CompanionEntity extends PathfinderMob
             }
         }
         boolean damaged = super.hurt(source, amount);
+        if (damaged && !level().isClientSide) {
+            // Метка для паники — от ЛЮБОГО урона (как ваниль), ДО и независимо от провокации:
+            // suppressAggro всегда чистит lastHurtByMob, NpcPanicGoal читает этот тик.
+            recentlyPanicHurtTick = tickCount;
+        }
         // Провокация: до порога терпим случайные удары ИГРОКА (super.hurt уже вызвал setLastHurtByMob).
         // suppressed=true → аргро подавлено (гасим и HurtByTargetGoal, и ветку PursueAttackerGoal).
         boolean suppressed = damaged && !level().isClientSide && handleProvocation(source, amount);
@@ -1654,10 +1713,13 @@ public class CompanionEntity extends PathfinderMob
                 setPursuitTarget(attacker);
             }
         }
-        // Защитники (напр. големы у жителя) идут на атакующего — включая игрока. Независимо от провокации.
-        if (damaged && !level().isClientSide
+        // Защитники (напр. големы у жителя) идут на атакующего — включая игрока, но ТОЛЬКО когда агро
+        // реально состоялось: подавленный провокацией случайный тычок игрока — не повод голему получить
+        // вечную цель. FakePlayer (машины/турели модов) — не цель защитников (как в handleProvocation).
+        if (damaged && !level().isClientSide && !suppressed
                 && source.getEntity() instanceof net.minecraft.world.entity.LivingEntity att
-                && att != this) {
+                && att != this
+                && !(att instanceof net.minecraftforge.common.util.FakePlayer)) {
             alertDefenders(att);
         }
         return damaged;
@@ -1681,6 +1743,11 @@ public class CompanionEntity extends PathfinderMob
         // игрока (даже сопровождаемого) откладывал бы прощение чужой цели.
         if (player == getTarget()) {
             lastHurtByPlayerTick = tickCount;
+            // Настроенную цель («кого атаковать»/фракции) прощаемой НЕ делаем: это осознанная
+            // агрессия, её не «прощаем» (регресс 0.9.4b). Прощаемы только цели за удары/реванш.
+            if (!isConfiguredAggressorTarget(player)) {
+                forgivablePlayerUuid = player.getUUID();
+            }
         }
         // Игрок во враждебном тире репутации — настоящий враг, провокация не применяется.
         if (isHostileFactionPlayer(player)) {
@@ -1707,17 +1774,17 @@ public class CompanionEntity extends PathfinderMob
         if (byHits || byDamage) {
             provokeState.remove(player.getUUID()); // порог пройден — агрим нормально, счётчик сброшен
             lastHurtByPlayerTick = tickCount; // этот игрок сейчас станет целью — стартуем окно прощения
+            forgivablePlayerUuid = player.getUUID(); // цель взята ЗА УДАРЫ — её можно простить
             return false;
         }
         return suppressAggro();
     }
 
-    /** Провокация подавляет агро; но у паникующего NPC lastHurtByMob НЕ снимаем — иначе PanicGoal
-     *  («убегать при ударе») не сработает. Агро всё равно подавлено (возвращаем true). */
+    /** Провокация подавляет агро: lastHurtByMob снимаем ВСЕГДА (его читает HurtByTargetGoal —
+     *  иначе боевой паникёр агрился с первого удара). Паника от этого не ломается: NpcPanicGoal
+     *  завязан на recentlyPanicHurtTick, а не на lastHurtByMob. */
     private boolean suppressAggro() {
-        if (!cfgPanic) {
-            setLastHurtByMob(null);
-        }
+        setLastHurtByMob(null);
         return true;
     }
 
@@ -1736,7 +1803,10 @@ public class CompanionEntity extends PathfinderMob
         }
     }
 
-    /** Прощение: цель-игрок долго не бил → снять цель (зовётся из серверного тика). */
+    /** Прощение: цель-игрок, взятая ЗА УДАРЫ, долго не бьёт → снять цель (из серверного тика).
+     *  Прощаются ТОЛЬКО цели из forgivablePlayerUuid (реванш/порог провокации). Цели из
+     *  «кого атаковать»/природной вражды — настроенная агрессия, их не «прощаем» (иначе
+     *  цель сбрасывалась каждую секунду и NPC двигался рывками — регресс 0.9.4b). */
     private void tickForgiveness() {
         if (!cfgProvokeEnabled || cfgForgiveAfterTicks <= 0) {
             return;
@@ -1744,10 +1814,14 @@ public class CompanionEntity extends PathfinderMob
         if (!(getTarget() instanceof ServerPlayer player)) {
             return;
         }
+        if (forgivablePlayerUuid == null || !forgivablePlayerUuid.equals(player.getUUID())) {
+            return; // цель не за удары — прощение не для неё
+        }
         if (isHostileFactionPlayer(player)) {
             return; // враг по фракции — не прощаем
         }
         if (tickCount - lastHurtByPlayerTick >= cfgForgiveAfterTicks) {
+            forgivablePlayerUuid = null;
             setTarget(null);
             setLastHurtByMob(null);
         }

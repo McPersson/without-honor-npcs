@@ -104,11 +104,22 @@ public class CreatureTypeScreen extends ScaledScreen {
                 checkbox(g, cx, cy, hasCustomAttacker(sel[i].id()), tr(sel[i].nameKey()), mouseX, mouseY);
             }
         } else {
-            // Описание текущего типа — перенос по ширине окна.
-            List<FormattedCharSequence> desc = font.split(Component.translatable(ct.descKey()), WIN_W - PAD * 2);
+            // Описание текущего типа — перенос по ширине окна, не больше 3 строк: длинный перевод
+            // иначе наезжает на чекбокс «природной вражды» (top+62). Переполнение — «…» в конце.
+            int descW = WIN_W - PAD * 2;
+            List<FormattedCharSequence> desc = font.split(Component.translatable(ct.descKey()), descW);
+            boolean clipped = desc.size() > 3;
+            if (clipped) {
+                // Пере-сплит с местом под «…» — многоточие гарантированно не вылезет за окно.
+                desc = font.split(Component.translatable(ct.descKey()), descW - font.width("…")).subList(0, 3);
+            }
             int dy = top + 26;
-            for (FormattedCharSequence line : desc) {
+            for (int i = 0; i < desc.size(); i++) {
+                FormattedCharSequence line = desc.get(i);
                 g.drawString(font, line, x, dy, VanillaUIHelper.TEXT_GRAY, false);
+                if (clipped && i == desc.size() - 1) {
+                    g.drawString(font, "…", x + font.width(line), dy, VanillaUIHelper.TEXT_GRAY, false);
+                }
                 dy += 10;
             }
         }

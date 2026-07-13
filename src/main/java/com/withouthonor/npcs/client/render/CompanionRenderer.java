@@ -166,6 +166,14 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
         CompanionEntity.RenderTransform t = entity.getRenderTransform();
         // Портрет диалога не должен наследовать поворот трансформа
         if (t.hasRotation() && !CompanionEntity.GUI_POSE_CONTEXT) {
+            // Превью вкладки «Поза»: пивот поворота переносим в центр модели (центр → поворот →
+            // обратно), иначе вращение вокруг ног выталкивает модель из рамки превью.
+            // Центр ≈ половина роста игрока (1.8) × ваниль-масштаб player-модели 0.9375,
+            // с учётом масштаба трансформа (масштаб применяется позже в scale(), домножаем сами).
+            float pivotY = CompanionEntity.GUI_PREVIEW_CONTEXT ? 0.84375F * t.scaleY() : 0F;
+            if (pivotY != 0F) {
+                poseStack.translate(0F, pivotY, 0F);
+            }
             if (t.rotY() != 0) {
                 poseStack.mulPose(com.mojang.math.Axis.YP.rotationDegrees(t.rotY()));
             }
@@ -174,6 +182,9 @@ public class CompanionRenderer extends MobRenderer<CompanionEntity, PlayerModel<
             }
             if (t.rotZ() != 0) {
                 poseStack.mulPose(com.mojang.math.Axis.ZP.rotationDegrees(t.rotZ()));
+            }
+            if (pivotY != 0F) {
+                poseStack.translate(0F, -pivotY, 0F);
             }
         }
 

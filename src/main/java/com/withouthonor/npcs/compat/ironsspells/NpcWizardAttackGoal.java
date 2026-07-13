@@ -101,7 +101,13 @@ public class NpcWizardAttackGoal extends WizardAttackGoal {
         // Порядок фиксированный: attack, defense, movement, support (как у базы).
         List<ArrayList<AbstractSpell>> raw = List.of(attackSpells, defenseSpells, movementSpells, supportSpells);
         int supportWeight = getSupportWeight() - (lastSpellCategory == supportSpells ? REPEAT_PENALTY_SUPPORT : 0);
-        supportWeight = applyProactiveBuffFloor(supportWeight);
+        // Floor НЕ применяем сразу после поддержки: он поднимал бы вес поверх штрафа анти-повтора,
+        // и при 2+ неналоженных баффах NPC кастовал поддержку подряд (в т.ч. хил вместо баффа —
+        // спелл внутри категории выбирается рандомно). Забафф в начале боя не страдает: баффы
+        // просто перемежаются атакой, а не идут очередью.
+        if (lastSpellCategory != supportSpells) {
+            supportWeight = applyProactiveBuffFloor(supportWeight);
+        }
         int[] weights = {
                 getAttackWeight(), // атаку после атаки не штрафуем: молотить боевыми подряд — норма
                 getDefenseWeight() - (lastSpellCategory == defenseSpells ? REPEAT_PENALTY_DEFENSE : 0),
